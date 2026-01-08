@@ -481,41 +481,73 @@ def generate_receipt():
     clients = Client.query.order_by(Client.name).all()
 
     if request.method == 'POST':
-        client_id = request.form.get('client_id')
-        amount = float(request.form.get('amount') or 0)
-        method = request.form.get('method')
-        reference = request.form.get('reference')
-        description = request.form.get('description')
-
         receipt = Receipt(
-            client_id=client_id,
-            amount=amount,
-            method=method,
-            reference=reference,
-            description=description
+            client_id=request.form.get('client_id'),
+            amount=float(request.form.get('amount') or 0),
+            method=request.form.get('method'),
+            reference=request.form.get('reference'),
+            description=request.form.get('description')
         )
         db.session.add(receipt)
         db.session.commit()
 
-        return redirect(url_for('export_receipt', receipt_id=receipt.id))
+        return redirect(url_for('preview_receipt', receipt_id=receipt.id))
 
     return render_template_string(RECEIPT_HTML, clients=clients)
-
-
-@app.route('/export_receipt/<int:receipt_id>')
+@app.route('/receipt/preview/<int:receipt_id>')
 @login_required
-def export_receipt(receipt_id):
+def preview_receipt(receipt_id):
+    receipt = Receipt.query.get_or_404(receipt_id)
+    client = Client.query.get(receipt.client_id)
+
+    return render_template_string(
+        RECEIPT_PREVIEW_HTML,
+        receipt=receipt,
+        client=client,
+        today=datetime.now().strftime("%d %b %Y")
+    )    
+
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+
+@app.route('/receipt/pdf/<int:receipt_id>')
+@login_required
+def download_receipt_pdf(receipt_id):
     receipt = Receipt.query.get_or_404(receipt_id)
     client = Client.query.get(receipt.client_id)
 
     buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=(200 * mm, 100 * mm))
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(20, 80, f"Receipt for {client.name}")
-    c.drawString(20, 65, f"Amount: ₵{receipt.amount}")
-    c.drawString(20, 50, f"Method: {receipt.method}")
-    c.drawString(20, 35, f"Reference: {receipt.reference}")
-    c.drawString(20, 20, f"Description: {receipt.description}")
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    # === Background letterhead ===
+    bg_path = os.path.join('static', 'letterhead_receipt.png')
+    if os.path.exists(bg_path):
+        bg = ImageReader(bg_path)
+        c.drawImage(bg, 0, 0, width=width, height=height)
+
+    # === Receipt Text Positions (adjust if needed) ===
+    c.setFont("Helvetica", 11)
+
+    c.drawString(80, 520, f"{receipt.id:06d}")           # Receipt No
+    c.drawString(400, 520, datetime.now().strftime("%d %b %Y"))
+
+    c.drawString(120, 480, client.name)
+    c.drawString(120, 455, f"GHS {receipt.amount:,.2f}")
+
+    c.drawString(120, 430, receipt.method or "-")
+    c.drawString(120, 405, receipt.reference or "-")
+
+    c.setFont("Helvetica", 10)
+    c.drawString(120, 375, receipt.description or "-")
+
+    # === Stamp ===
+    stamp_path = os.path.join('static', 'stamp.png')
+    if os.path.exists(stamp_path):
+        stamp = ImageReader(stamp_path)
+        c.drawImage(stamp, 380, 180, width=140, height=140, mask='auto')
+
     c.showPage()
     c.save()
     buffer.seek(0)
@@ -523,7 +555,7 @@ def export_receipt(receipt_id):
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"receipt_{receipt.id}.pdf",
+        download_name=f"Receipt_{receipt.id}.pdf",
         mimetype="application/pdf"
     )
 # AttributeError: 'Receipt' object has no attribute 'client_name'
@@ -2051,6 +2083,75 @@ RECEIPT_HTML = """<!doctype html>
 </div>
 </body>
 </html>"""
+RECEIPT_PREVIEW_HTML = """
+<!doctype html>
+<html>
+<head>
+<title>Receipt Preview</title>
+<style>
+body{
+  background:#f3f4f6;
+  font-family:Arial,sans-serif;
+}
+.wrap{
+  max-width:800px;
+  margin:40px auto;
+  background:white;
+  padding:20px;
+  border-radius:12px;
+}
+.preview{
+  background:url('{{ url_for('static', filename='letterhead_receipt.png') }}') no-repeat;
+  background-size:100% auto;
+  height:1100px;
+  position:relative;
+}
+.txt{
+  position:absolute;
+  font-size:14px;
+}
+.btns{
+  margin-top:20px;
+  display:flex;
+  gap:10px;
+}
+a.btn{
+  padding:10px 16px;
+  background:#2563eb;
+  color:white;
+  border-radius:8px;
+  text-decoration:none;
+  font-weight:600;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Receipt Preview</h2>
+
+  <div class="preview">
+    <div class="txt" style="left:80px; top:200px;">{{ "%06d"|format(receipt.id) }}</div>
+    <div class="txt" style="left:500px; top:200px;">{{ today }}</div>
+
+    <div class="txt" style="left:120px; top:260px;">{{ client.name }}</div>
+    <div class="txt" style="left:120px; top:300px;">GHS {{ "%.2f"|format(receipt.amount) }}</div>
+
+    <div class="txt" style="left:120px; top:340px;">{{ receipt.method }}</div>
+    <div class="txt" style="left:120px; top:380px;">{{ receipt.reference or "-" }}</div>
+
+    <div class="txt" style="left:120px; top:420px; width:400px;">
+      {{ receipt.description or "-" }}
+    </div>
+  </div>
+
+  <div class="btns">
+    <a class="btn" href="{{ url_for('download_receipt_pdf', receipt_id=receipt.id) }}">Download PDF</a>
+    <a class="btn" href="{{ url_for('generate_receipt') }}">New Receipt</a>
+  </div>
+</div>
+</body>
+</html>
+"""
 
 # -----------------------
 # RUN APP
