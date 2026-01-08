@@ -171,6 +171,18 @@ def home():
         q=q,
         selected_date=date_str
     )
+@app.route('/clients')
+@login_required
+def clients_page():
+    q = request.args.get('q', '').strip()
+
+    query = Client.query
+    if q:
+        query = query.filter(Client.name.ilike(f'%{q}%'))
+
+    clients = query.order_by(Client.name).all()
+
+    return render_template_string(CLIENTS_PAGE_HTML, clients=clients, q=q)
 
 @app.route('/add_client', methods=['POST'])
 @login_required
@@ -1082,7 +1094,7 @@ button[type="submit"]:hover,
 
       <nav class="nav">
         <a href="#" class="active">Dashboard</a>
-        <a href="{{ url_for('home') }}">Clients</a>
+        <a href="{{ url_for('clients_page') }}">Clients</a>
         <a href="{{ url_for('generate_receipt') }}">Receipts</a>
         <a href="{{ url_for('house_bl') }}">House BLs</a>
         <a href="{{ url_for('logout') }}">Logout</a>
@@ -1509,6 +1521,79 @@ function toggleEditClient() {
     </div>
 
     <footer>© 2025 CargoBloc Logistics — Vision to Reality </footer>
+  </div>
+</body>
+</html>"""
+CLIENTS_PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clients — CargoBloc</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  body{
+    font-family:'Poppins',sans-serif;
+    background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+    background-size:cover;
+    margin:0; padding:0;
+  }
+  .wrap{
+    max-width:1000px;
+    margin:40px auto;
+    background:rgba(255,255,255,0.95);
+    border-radius:16px;
+    padding:24px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.08);
+  }
+  h1{color:#2563eb;margin:0 0 14px;}
+  .top{
+    display:flex; gap:10px; margin-bottom:14px;
+  }
+  input{
+    flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db;
+  }
+  button{
+    padding:10px 16px; border:none; border-radius:8px;
+    background:#2563eb; color:#fff; font-weight:600; cursor:pointer;
+  }
+  .list{margin-top:16px;}
+  .item{
+    display:flex; justify-content:space-between; align-items:center;
+    background:#fff; padding:12px; border-radius:10px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    margin-bottom:10px;
+  }
+  .meta small{color:#6b7280;}
+  a.open{
+    background:#00AEEF; color:#fff; padding:6px 12px;
+    border-radius:8px; text-decoration:none; font-weight:600;
+  }
+  a.back{color:#2563eb;text-decoration:none;font-weight:600;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <a href="{{ url_for('home') }}" class="back">← Back to Dashboard</a>
+    <h1>Clients</h1>
+
+    <form class="top" method="get">
+      <input name="q" placeholder="Search client..." value="{{ q or '' }}">
+      <button type="submit">Search</button>
+    </form>
+
+    <div class="list">
+      {% for c in clients %}
+      <div class="item">
+        <div class="meta">
+          <strong>{{ c.name }}</strong><br>
+          <small>{{ c.email or '-' }} • {{ c.phone or '-' }}</small>
+        </div>
+        <a class="open" href="{{ url_for('client_detail', client_id=c.id) }}">Open</a>
+      </div>
+      {% else %}
+        <p>No clients found.</p>
+      {% endfor %}
+    </div>
   </div>
 </body>
 </html>"""
