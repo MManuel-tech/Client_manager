@@ -6,8 +6,24 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from werkzeug.utils import secure_filename
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+from io import BytesIO
+import os
+from datetime import datetime
+from flask import send_file
+
+
+def get_static_file(filename):
+    """Return absolute path to a file in the `static/` folder."""
+    return os.path.join(current_app.root_path, 'static', filename)
+
+def link_callback(uri, rel):
+    if uri.startswith('/static/'):
+        path = os.path.join(current_app.root_path, uri.lstrip('/'))
+        return path
+    return uri
 
 app = Flask(__name__)
 app.secret_key = 'cargobloc_secret_key'
@@ -510,6 +526,7 @@ def preview_receipt(receipt_id):
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
+from reportlab.lib.units import mm
 
 @app.route('/receipt/pdf/<int:receipt_id>')
 @login_required
@@ -521,33 +538,97 @@ def download_receipt_pdf(receipt_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # === Background letterhead ===
+    # ===== BACKGROUND LETTERHEAD =====
     bg_path = os.path.join('static', 'letterhead_receipt.png')
     if os.path.exists(bg_path):
         bg = ImageReader(bg_path)
         c.drawImage(bg, 0, 0, width=width, height=height)
 
-    # === Receipt Text Positions (adjust if needed) ===
-    c.setFont("Helvetica", 11)
+    # ===== MATCH PREVIEW POSITIONS =====
+    # preview y from top → pdf y = height - y
 
-    c.drawString(80, 520, f"{receipt.id:06d}")           # Receipt No
-    c.drawString(400, 520, datetime.now().strftime("%d %b %Y"))
+    rno_x = 90
+    rno_y = height - 300
 
-    c.drawString(120, 480, client.name)
-    c.drawString(120, 455, f"GHS {receipt.amount:,.2f}")
+    date_x = 650
+    date_y = height - 300
 
-    c.drawString(120, 430, receipt.method or "-")
-    c.drawString(120, 405, receipt.reference or "-")
+    content_x = 90
+    content_y = height - 400
 
-    c.setFont("Helvetica", 10)
-    c.drawString(120, 375, receipt.description or "-")
+    # ===== RECEIPT NO & DATE =====
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(rno_x, rno_y, f"Receipt No: {receipt.id:06d}")
 
-    # === Stamp ===
+    c.setFont("Helvetica", 12)
+    c.drawString(date_x, date_y, datetime.now().strftime("%d %b %Y"))
+
+    # ===== CONTENT BLOCK =====
+    c.setFont("Helvetica", 12)
+    line_height = 22
+    y = content_y
+
+    c.drawString(content_x, y, f"Client: {client.name}")
+    y -= line_height
+
+    c.drawString(content_x, y, f"Amount: GHS {receipt.amount:,.2f}")
+    y -= line_height
+
+    c.drawString(content_x, y, f"Method: {receipt.method or '-'}")
+    y -= line_height
+
+    c.drawString(content_x, y, f"Reference: {receipt.reference or '-'}")
+    y -= line_height
+
+    # description wrapping
+    desc = receipt.description or "-"
+    from textwrap import wrap
+    wrapped = wrap(desc, 70)
+    for line in wrapped:
+        c.drawString(content_x, y, f"Description: {line}" if line == wrapped[0] else line)
+        y -= line_height
+
+    # ===== STAMP + SIGNATURE GROUP =====
+    # preview: right:120px, top:460px
+
+    group_right = 120
+    group_top = height - 460
+
+    stamp_w = 110
+    stamp_h = 110
+    sig_w = 120
+    sig_h = 45
+
+    stamp_x = width - group_right - stamp_w
+    stamp_y = group_top - stamp_h
+
+    sig_x = width - group_right - sig_w
+    sig_y = stamp_y + stamp_h + 8
+
+    # signature
+    sig_path = os.path.join('static', 'signature.png')
+    if os.path.exists(sig_path):
+        sig = ImageReader(sig_path)
+        c.drawImage(sig, sig_x, sig_y, width=sig_w, height=sig_h, mask='auto')
+
+    # stamp
     stamp_path = os.path.join('static', 'stamp.png')
     if os.path.exists(stamp_path):
         stamp = ImageReader(stamp_path)
-        c.drawImage(stamp, 380, 180, width=140, height=140, mask='auto')
+        c.drawImage(stamp, stamp_x, stamp_y, width=stamp_w, height=stamp_h, mask='auto')
 
+    # line + manager name
+    line_w = stamp_w + 20
+    line_x = stamp_x - 10
+    line_y = stamp_y - 18
+
+    c.setLineWidth(0.8)
+    c.line(line_x, line_y, line_x + line_w, line_y)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(line_x + line_w/2, line_y - 14, "Romeo Frimpong — Manager")
+
+    # ===== FINISH =====
     c.showPage()
     c.save()
     buffer.seek(0)
@@ -555,9 +636,11 @@ def download_receipt_pdf(receipt_id):
     return send_file(
         buffer,
         as_attachment=True,
-        download_name=f"Receipt_{receipt.id}.pdf",
+        download_name=f"Receipt_{receipt.id:06d}.pdf",
         mimetype="application/pdf"
     )
+
+
 # AttributeError: 'Receipt' object has no attribute 'client_name'
 # -----------------------
 # PDF helpers
@@ -2058,11 +2141,18 @@ RECEIPT_HTML = """<!doctype html>
 <button class="print-btn" onclick="window.print()">🖨 Print Receipt</button>
 
 <div class="receipt" style="
-     background: url('{{ url_for('static', filename='letterhead_receipt.png') }}') no-repeat center top;
-     background-size: contain;
-     min-height: 800px; /* adjust to your letterhead size */
-     padding: 150px 40px 40px 40px;
-     position: relative;
+  
+    .preview{
+   position:relative;
+   background: url('{{ url_for("static", filename="letterhead_receipt.png") }}') no-repeat;
+   background-size: 100% auto;
+   width: 100%;
+   height: 1120px;
+   border-radius: 6px;
+   overflow: hidden;
+   }  
+     
+     
 ">
   <h3 style="text-align:center; color:#2563eb; margin-bottom:30px;">Payment Receipt</h3>
 
@@ -2076,53 +2166,88 @@ RECEIPT_HTML = """<!doctype html>
 
   <!-- Stamp (optional if it's already in the letterhead) -->
   <div class="stamp" style="position:absolute; bottom:50px; right:50px;">
-    <img src="{{ url_for('static', filename='stamp.png') }}" alt="Stamp" style="height:80px;">
+    <img src="{{ url_for('static', filename='signature.png') }}" alt="Signature">
+    <img src="{{ url_for('static', filename='stamp.png') }}" alt="Stamp">
   </div>
 </div>
 {% endif %}
 </div>
 </body>
 </html>"""
+
 RECEIPT_PREVIEW_HTML = """
 <!doctype html>
 <html>
 <head>
 <title>Receipt Preview</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{
-  background:#f3f4f6;
-  font-family:Arial,sans-serif;
+  body{ background:#f3f4f6; font-family: 'Poppins', sans-serif; }
+  .wrap{ max-width:900px; margin:30px auto; text-align:left; }
+  .preview{
+    position:relative;
+    background: url('{{ url_for('static', filename='letterhead_receipt.png') }}') no-repeat;
+    background-size: 100% auto;
+    width: 100%;
+    height: 1120px;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .content {
+    position: absolute;
+    left: 90px;
+    top: 400px;
+    right: 90px;
+    color: #111;
+    font-size: 18px;
+    line-height: 2.8;
+  }
+
+  .rno { position:absolute; left: 90px; top: 300px; font-weight:700; font-size:18px; }
+  .rdate{ position:absolute; left: 650px; top: 300px; font-weight:600; font-size:18px; }
+
+  .line { margin-bottom:10px; }
+
+  /* stamp and signature group (mid-right area) */
+  .stamp-group {
+    position:absolute;
+    right:90px;    /* move left-right */
+    top: 670px;     /* move up-down to position group relative to page */
+    width:160px;
+    text-align:center;
+  }
+  .stamp-group .stamp img { height:110px; width:auto; display:block; margin:0 auto; }
+
+  /* signature (above the stamp) */
+  .stamp-group .signature {
+  position: absolute;
+  top: 70px;       /* ⬅ move UP / DOWN */
+  left: 50%;
+  transform: translateX(-50%);
 }
-.wrap{
-  max-width:800px;
-  margin:40px auto;
-  background:white;
-  padding:20px;
-  border-radius:12px;
+
+.stamp-group .signature img {
+  height:50px;     /* ⬅ signature size */
+  width:auto;
 }
-.preview{
-  background:url('{{ url_for('static', filename='letterhead_receipt.png') }}') no-repeat;
-  background-size:100% auto;
-  height:1100px;
-  position:relative;
-}
-.txt{
-  position:absolute;
-  font-size:14px;
-}
-.btns{
-  margin-top:20px;
-  display:flex;
-  gap:10px;
-}
-a.btn{
-  padding:10px 16px;
-  background:#2563eb;
-  color:white;
-  border-radius:8px;
-  text-decoration:none;
-  font-weight:600;
-}
+
+  /* line under signature/stamp with manager name */
+  .sig-line {
+    height:1px;
+    background:#222;
+    margin:6px auto 4px;
+    width:140px;
+    opacity:0.9;
+  }
+  .manager {
+    font-size:13px;
+    font-weight:700;
+    color:#222;
+  }
+
+  .btns { margin-top:14px; display:flex; gap:10px; }
+  a.btn{ padding:10px 14px; background:#2563eb; color:white; border-radius:8px; text-decoration:none; font-weight:600; }
 </style>
 </head>
 <body>
@@ -2130,17 +2255,30 @@ a.btn{
   <h2>Receipt Preview</h2>
 
   <div class="preview">
-    <div class="txt" style="left:80px; top:200px;">{{ "%06d"|format(receipt.id) }}</div>
-    <div class="txt" style="left:500px; top:200px;">{{ today }}</div>
+    <div class="rno">Receipt No: {{ "%06d"|format(receipt.id) }}</div>
+    <div class="rdate">Date: {{ today }}</div>
 
-    <div class="txt" style="left:120px; top:260px;">{{ client.name }}</div>
-    <div class="txt" style="left:120px; top:300px;">GHS {{ "%.2f"|format(receipt.amount) }}</div>
+    <div class="content">
+      <div class="line"><strong>Client:</strong> {{ client.name }}</div>
+      <div class="line"><strong>Amount:</strong> GHS {{ "%.2f"|format(receipt.amount) }}</div>
+      <div class="line"><strong>Method:</strong> {{ receipt.method or '-' }}</div>
+      <div class="line"><strong>Reference:</strong> {{ receipt.reference or '-' }}</div>
+      <div class="line"><strong>Description:</strong> {{ receipt.description or '-' }}</div>
+    </div>
 
-    <div class="txt" style="left:120px; top:340px;">{{ receipt.method }}</div>
-    <div class="txt" style="left:120px; top:380px;">{{ receipt.reference or "-" }}</div>
+    <!-- stamp + signature group: signature above, stamp, line and manager name -->
+    <div class="stamp-group">
+      <!-- optional signature image (place a transparent PNG at static/signature.png) -->
+      <div class="signature">
+        <img src="{{ url_for('static', filename='signature.png') }}" alt="Signature">
+      </div>
 
-    <div class="txt" style="left:120px; top:420px; width:400px;">
-      {{ receipt.description or "-" }}
+      <div class="stamp">
+        <img src="{{ url_for('static', filename='stamp.png') }}" alt="Stamp">
+      </div>
+
+      <div class="sig-line"></div>
+      <div class="manager">Romeo Frimpong — Manager</div>
     </div>
   </div>
 
@@ -2150,8 +2288,7 @@ a.btn{
   </div>
 </div>
 </body>
-</html>
-"""
+</html>  """
 
 # -----------------------
 # RUN APP
