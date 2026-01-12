@@ -524,9 +524,13 @@ def preview_receipt(receipt_id):
     )    
 
 
+
+
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
-from reportlab.lib.units import mm
+from io import BytesIO
+from datetime import datetime
+from textwrap import wrap
 
 @app.route('/receipt/pdf/<int:receipt_id>')
 @login_required
@@ -547,63 +551,87 @@ def download_receipt_pdf(receipt_id):
     # ===== MATCH PREVIEW POSITIONS =====
     # preview y from top → pdf y = height - y
 
-    rno_x = 90
-    rno_y = height - 300
+    rno_x = 60
+    rno_y = height - 210
 
-    date_x = 650
-    date_y = height - 300
+    date_x = 460
+    date_y = height - 210
 
-    content_x = 90
-    content_y = height - 400
+    content_x = 60
+    content_y = height - 290
 
     # ===== RECEIPT NO & DATE =====
     c.setFont("Helvetica-Bold", 12)
     c.drawString(rno_x, rno_y, f"Receipt No: {receipt.id:06d}")
 
-    c.setFont("Helvetica", 12)
+    c.setFont("Helvetica-Bold", 12)
     c.drawString(date_x, date_y, datetime.now().strftime("%d %b %Y"))
 
     # ===== CONTENT BLOCK =====
-    c.setFont("Helvetica", 12)
-    line_height = 22
+    line_height = 45
     y = content_y
 
-    c.drawString(content_x, y, f"Client: {client.name}")
+    label_x = content_x
+    value_x = content_x + 120   # space after label
+
+    # ---- Client ----
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(label_x, y, "Client:")
+    c.setFont("Helvetica", 12)
+    c.drawString(value_x, y, client.name)
     y -= line_height
 
-    c.drawString(content_x, y, f"Amount: GHS {receipt.amount:,.2f}")
+    # ---- Amount ----
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(label_x, y, "Amount:")
+    c.setFont("Helvetica", 12)
+    c.drawString(value_x, y, f"GHS {receipt.amount:,.2f}")
     y -= line_height
 
-    c.drawString(content_x, y, f"Method: {receipt.method or '-'}")
+    # ---- Method ----
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(label_x, y, "Method:")
+    c.setFont("Helvetica", 12)
+    c.drawString(value_x, y, receipt.method or "-")
     y -= line_height
 
-    c.drawString(content_x, y, f"Reference: {receipt.reference or '-'}")
+    # ---- Reference ----
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(label_x, y, "Reference:")
+    c.setFont("Helvetica", 12)
+    c.drawString(value_x, y, receipt.reference or "-")
     y -= line_height
 
-    # description wrapping
+    # ---- Description ----
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(label_x, y, "Description:")
+    y -= line_height
+
+    c.setFont("Helvetica", 12)
     desc = receipt.description or "-"
     from textwrap import wrap
-    wrapped = wrap(desc, 70)
+    wrapped = wrap(desc, 80)
+
     for line in wrapped:
-        c.drawString(content_x, y, f"Description: {line}" if line == wrapped[0] else line)
+        c.drawString(label_x, y, line)
         y -= line_height
 
     # ===== STAMP + SIGNATURE GROUP =====
     # preview: right:120px, top:460px
 
-    group_right = 120
-    group_top = height - 460
+    group_right = 75
+    group_top = height - 560
 
-    stamp_w = 110
-    stamp_h = 110
-    sig_w = 120
-    sig_h = 45
+    stamp_w = 70
+    stamp_h = 70
+    sig_w = 70
+    sig_h = 20
 
     stamp_x = width - group_right - stamp_w
     stamp_y = group_top - stamp_h
 
     sig_x = width - group_right - sig_w
-    sig_y = stamp_y + stamp_h + 8
+    sig_y = stamp_y + stamp_h + -60
 
     # signature
     sig_path = os.path.join('static', 'signature.png')
@@ -626,7 +654,8 @@ def download_receipt_pdf(receipt_id):
     c.line(line_x, line_y, line_x + line_w, line_y)
 
     c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(line_x + line_w/2, line_y - 14, "Romeo Frimpong — Manager")
+    c.drawCentredString(line_x + line_w/2, line_y - 10, "Romeo Frimpong — Manager")
+    
 
     # ===== FINISH =====
     c.showPage()
