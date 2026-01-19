@@ -1,19 +1,60 @@
-# app.py
+# app.py — CLEAN IMPORTS
 import os
-from datetime import datetime
-from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory
+import shutil
+import logging
+from io import BytesIO
+from datetime import datetime, timedelta
+
+from flask import (
+    Flask, request, redirect, url_for,
+    send_from_directory, send_file,
+    render_template_string, abort
+)
+
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
+from flask_login import (
+    LoginManager, UserMixin,
+    login_user, logout_user,
+    login_required, current_user
+)
+
+from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from io import BytesIO
-import os
-from datetime import datetime
-from flask import send_file
 
+
+app = Flask(__name__)
+app.secret_key = 'cargobloc_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clients.db'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+
+csrf = CSRFProtect(app)
+app.secret_key = os.environ.get("SECRET_KEY", "CHANGE_THIS_IN_PRODUCTION")
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"]
+)
+logging.basicConfig(
+    filename="security.log",
+    level=logging.WARNING,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,   # JS can't read cookies
+    SESSION_COOKIE_SAMESITE="Lax",   # prevents CSRF
+    SESSION_COOKIE_SECURE=not app.debug     
+)
 
 def get_static_file(filename):
     """Return absolute path to a file in the `static/` folder."""
@@ -24,16 +65,17 @@ def link_callback(uri, rel):
         path = os.path.join(current_app.root_path, uri.lstrip('/'))
         return path
     return uri
-
-app = Flask(__name__)
-app.secret_key = 'cargobloc_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clients.db'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "docx"}
+
+def allowed_file(filename):
+    return (
+        "." in filename and
+        filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
 # -----------------------
 # MODELS
@@ -41,7 +83,7 @@ login_manager.login_view = 'login'
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(50), nullable=False)
+    password = db.Column(db.String(255), nullable=False)
 
 class Client(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -61,6 +103,12 @@ class BL(db.Model):
     client_id = db.Column(db.Integer, db.ForeignKey('client.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    receipt_bls = db.relationship(
+        'ReceiptBL',
+        backref='bl',
+        cascade="all, delete-orphan"
+    )
+  
     @property
     def amount_unpaid(self):
         return max((self.amount_total or 0) - (self.amount_paid or 0), 0)
@@ -98,6 +146,32 @@ class Receipt(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     client = db.relationship('Client', backref='receipts')
+
+    receipt_bls = db.relationship(
+        'ReceiptBL',
+        backref='receipt',
+        cascade="all, delete-orphan"
+    )
+
+class ReceiptBL(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    receipt_id = db.Column(
+        db.Integer,
+        db.ForeignKey('receipt.id'),
+        nullable=False
+    )
+
+    bl_id = db.Column(
+        db.Integer,
+        db.ForeignKey('bl.id'),
+        nullable=False
+    )
+
+    amount_applied = db.Column(db.Float, default=0)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)    
+
 # -----------------------
 # LOGIN MANAGEMENT
 # -----------------------
@@ -105,17 +179,34 @@ class Receipt(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-@app.before_request
+@app.before_first_request
 def create_default_user():
     # create admin if DB empty; password requested earlier: Cargo@conso123
     if not User.query.first():
-        db.session.add(User(username='admin', password='Cargo@conso123'))
+        db.session.add(
+          User(
+            username='admin',
+            password=generate_password_hash('Cargo@conso123')
+          )
+        )
         db.session.commit()
         print("✅ Default login → username: admin | password: Cargo@conso123")
+#----------------------
+#BACKUP       
+#-----------------------
 
+def backup_database():
+    if not os.path.exists("backups"):
+        os.makedirs("backups")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+
+    print("✅ Database backup created")
 # -----------------------
 # ROUTES
 # -----------------------
+@limiter.limit("5 per minute")
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
@@ -124,8 +215,9 @@ def login():
         password = request.form.get('password', '').strip()
         remember = request.form.get('remember') == 'on'
 
-        user = User.query.filter_by(username=username, password=password).first()
-        if user:
+        user = User.query.filter_by(username=username).first()
+
+        if user and check_password_hash(user.password, password):
             login_user(user, remember=remember)
             return redirect(url_for('home'))
         else:
@@ -178,27 +270,43 @@ def home():
     total_paid = sum(sum((bl.amount_paid or 0) for bl in c.bls) for c in clients)
     total_unpaid = total_billed - total_paid
 
+    activities = []
+
+    # recent clients (no created_at → fake datetime)
+    for c in Client.query.order_by(Client.id.desc()).limit(3):
+        activities.append({
+            "text": f"Client added: {c.name}",
+            "time": datetime.utcnow() - timedelta(days=365 + c.id)
+        })
+
+    # recent receipts
+    for r in Receipt.query.order_by(Receipt.created_at.desc()).limit(3):
+        activities.append({
+            "text": f"Receipt generated for {r.client.name} (₵{r.amount:,.2f})",
+            "time": r.created_at
+        })
+
+    # recent house BLs
+    for h in HouseBL.query.order_by(HouseBL.created_at.desc()).limit(2):
+        activities.append({
+            "text": f"House BL created: {h.bl_number}",
+            "time": h.created_at
+        })
+
+    # safe sort (ALL are datetimes now)
+    activities.sort(key=lambda x: x["time"], reverse=True)
+
     return render_template_string(
         HOME_HTML,
         clients=clients,
         total_billed=total_billed,
         total_paid=total_paid,
         total_unpaid=total_unpaid,
+        activities=activities,
         q=q,
         selected_date=date_str
     )
-@app.route('/clients')
-@login_required
-def clients_page():
-    q = request.args.get('q', '').strip()
 
-    query = Client.query
-    if q:
-        query = query.filter(Client.name.ilike(f'%{q}%'))
-
-    clients = query.order_by(Client.name).all()
-
-    return render_template_string(CLIENTS_PAGE_HTML, clients=clients, q=q)
 
 @app.route('/add_client', methods=['POST'])
 @login_required
@@ -209,7 +317,7 @@ def add_client():
                notes=request.form.get('notes'))
     db.session.add(c)
     db.session.commit()
-    return redirect(url_for('home'))
+    return redirect(url_for('clients_page'))
 
 @app.route('/client/<int:client_id>', methods=['GET', 'POST'])
 @login_required
@@ -217,30 +325,58 @@ def client_detail(client_id):
     client = Client.query.get_or_404(client_id)
     info = None
 
+    # ===== FINANCE SUMMARY (ALWAYS RUNS) =====
+    total_billed = sum((bl.amount_total or 0) for bl in client.bls)
+    total_paid = sum((bl.amount_paid or 0) for bl in client.bls)
+    total_unpaid = total_billed - total_paid
+
+    if total_billed == 0:
+        finance_status = "No BLs"
+    elif total_unpaid <= 0:
+        finance_status = "Cleared"
+    elif total_paid > 0:
+        finance_status = "Part Paid"
+    else:
+        finance_status = "Owing"
+
+    
     if request.method == 'POST':
         action = request.form.get('action')
 
+        # ===== ADD SINGLE BL =====
         if action == 'add_bl':
             bl_number = request.form.get('bl_number', '').strip()
+
             try:
                 total = float(request.form.get('amount_total') or 0)
             except:
                 total = 0.0
+
             try:
                 paid = float(request.form.get('amount_paid') or 0)
             except:
                 paid = 0.0
+
             file = request.files.get('bl_document')
             filename = None
             if file and file.filename:
                 filename = secure_filename(file.filename)
                 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            db.session.add(BL(bl_number=bl_number, amount_total=total, amount_paid=paid,
-                              document=filename, client=client))
+
+            db.session.add(BL(
+                bl_number=bl_number,
+                amount_total=total,
+                amount_paid=paid,
+                document=filename,
+                client=client
+            ))
             db.session.commit()
             return redirect(url_for('client_detail', client_id=client.id))
+      
 
+
+        # ===== RECORD PAYMENT =====
         elif action == 'record_payment':
             try:
                 bl_id = int(request.form.get('bl_id'))
@@ -248,12 +384,48 @@ def client_detail(client_id):
             except:
                 bl_id = None
                 extra_payment = 0
+
             bl = BL.query.get(bl_id) if bl_id else None
             if bl:
                 bl.amount_paid = (bl.amount_paid or 0) + extra_payment
                 db.session.commit()
+
             return redirect(url_for('client_detail', client_id=client.id))
 
+
+        # ===== ADD MULTIPLE BLs AT ONCE =====
+        elif action == 'add_multi_bl':
+            bl_numbers = request.form.getlist('bl_number[]')
+            totals = request.form.getlist('amount_total[]')
+            paids = request.form.getlist('amount_paid[]')
+
+            for i in range(len(bl_numbers)):
+                bl_number = bl_numbers[i].strip()
+                if not bl_number:
+                    continue
+
+                try:
+                    total = float(totals[i]) if totals[i] else 0.0
+                except:
+                    total = 0.0
+
+                try:
+                    paid = float(paids[i]) if paids[i] else 0.0
+                except:
+                    paid = 0.0
+
+                db.session.add(BL(
+                    bl_number=bl_number,
+                    amount_total=total,
+                    amount_paid=paid,
+                    client=client
+                ))
+
+            db.session.commit()
+            return redirect(url_for('client_detail', client_id=client.id))
+
+
+        # ===== UPLOAD CLIENT DOCUMENT =====
         elif action == 'add_doc':
             file = request.files.get('client_document')
             if file and file.filename:
@@ -263,25 +435,48 @@ def client_detail(client_id):
                 desc = request.form.get('doc_desc', '')
                 db.session.add(ClientDocument(filename=filename, description=desc, client=client))
                 db.session.commit()
+
             return redirect(url_for('client_detail', client_id=client.id))
 
+
+        # ===== EXPORT SELECTED BLs =====
         elif action == 'export_selected_bl':
-            # get selected checkboxes (multiple)
             bl_ids = request.form.getlist('bl_ids')
-            # filter ensures BLs belong to this client
-            bls = BL.query.filter(BL.client_id == client.id, BL.id.in_(bl_ids)).all() if bl_ids else []
+
+            bls = (
+                BL.query
+                .filter(BL.client_id == client.id, BL.id.in_(bl_ids))
+                .all()
+                if bl_ids else []
+            )
 
             if not bls:
-                # show friendly message in same page
                 info = "⚠ Please select at least one BL to export."
-                return render_template_string(CLIENT_HTML, client=client, info=info)
+                return render_template_string(
+                    CLIENT_HTML,
+                    client=client,
+                    info=info,
+                    total_billed=total_billed,
+                    total_paid=total_paid,
+                    total_unpaid=total_unpaid,
+                    finance_status=finance_status
+                )
 
-            # create pdf for selected BLs
-            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{client.name}selected{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf")
+            pdf_path = os.path.join(
+                app.config['UPLOAD_FOLDER'],
+                f"{client.name}_selected_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
+            )
+
             os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             create_bl_pdf(client, bls, pdf_path)
-            return send_from_directory(app.config['UPLOAD_FOLDER'], os.path.basename(pdf_path), as_attachment=True)
 
+            return send_from_directory(
+                app.config['UPLOAD_FOLDER'],
+                os.path.basename(pdf_path),
+                as_attachment=True
+            )
+
+        # ===== EDIT CLIENT =====
         elif action == 'edit_client':
             client.name = request.form.get('name', client.name)
             client.email = request.form.get('email', client.email)
@@ -290,12 +485,24 @@ def client_detail(client_id):
             db.session.commit()
             return redirect(url_for('client_detail', client_id=client.id))
 
-    return render_template_string(CLIENT_HTML, client=client, info=info)
-
+       
+    return render_template_string(
+    CLIENT_HTML,
+    client=client,
+    info=info,
+    total_billed=total_billed,
+    total_paid=total_paid,
+    total_unpaid=total_unpaid,
+    finance_status=finance_status
+)
 @app.route('/client/<int:client_id>/delete')
 @login_required
 def delete_client(client_id):
-    db.session.delete(Client.query.get_or_404(client_id))
+    if current_user.username != "admin":
+        abort(403)
+
+    client = Client.query.get_or_404(client_id)
+    db.session.delete(client)
     db.session.commit()
     return redirect(url_for('home'))
 
@@ -491,50 +698,272 @@ from io import BytesIO
 from flask import send_file
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
+
+
+
+
+
+@app.route('/clients')
+@login_required
+def clients_page():
+    q = request.args.get('q', '').strip()
+    date_str = request.args.get('date', '').strip()
+
+    query = Client.query
+
+    if q:
+        query = query.filter(
+            (Client.name.ilike(f'%{q}%')) |
+            (Client.bls.any(BL.bl_number.ilike(f'%{q}%')))
+        )
+
+    if date_str:
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            query = query.join(BL).filter(db.func.date(BL.created_at) == date_obj)
+        except ValueError:
+            pass
+
+    clients = query.order_by(Client.name).all()
+
+    # ➜ ADD STATUS + TOTALS PER CLIENT
+    client_data = []
+
+    for c in clients:
+        total_billed = sum((bl.amount_total or 0) for bl in c.bls)
+        total_paid = sum((bl.amount_paid or 0) for bl in c.bls)
+        unpaid = total_billed - total_paid
+
+        if total_billed == 0:
+            status = "no-bl"
+        elif unpaid <= 0:
+            status = "cleared"
+        elif total_paid > 0:
+            status = "part"
+        else:
+            status = "owing"
+
+        client_data.append({
+            "client": c,
+            "total_billed": total_billed,
+            "total_paid": total_paid,
+            "unpaid": unpaid,
+            "status": status
+        })
+
+    return render_template_string(
+        CLIENTS_PAGE_HTML,
+        clients=client_data,
+        q=q,
+        selected_date=date_str
+    )
+
+
+
+
+
 @app.route('/generate_receipt', methods=['GET', 'POST'])
 @login_required
 def generate_receipt():
-    clients = Client.query.order_by(Client.name).all()
 
+    clients = Client.query.order_by(Client.name).all()
+    receipt = None
+    bls = []
+
+    # -------------------------
+    # LOAD BLs (GET)
+    # -------------------------
+    client_id = request.args.get('client_id', type=int)
+    if client_id:
+        bls = (
+            db.session.query(
+                BL,
+                db.func.max(Receipt.created_at).label("last_receipted_date")
+            )
+            .outerjoin(ReceiptBL, ReceiptBL.bl_id == BL.id)
+            .outerjoin(Receipt, Receipt.id == ReceiptBL.receipt_id)
+            .filter(BL.client_id == client_id)
+            .group_by(BL.id)
+            .order_by(BL.created_at.asc())
+            .all()
+        )
+
+    # -------------------------
+    # CREATE RECEIPT (POST)
+    # -------------------------
     if request.method == 'POST':
+
+        desc_type = request.form.get('description_type')
+        custom_desc = request.form.get('custom_description', '').strip()
+
+        if desc_type == 'custom' and custom_desc:
+            final_description = custom_desc
+        else:
+            final_description = desc_type
+
+        client_id = int(request.form.get('client_id'))
+        total_amount = float(request.form.get('amount'))
+        issued_by = request.form.get('issued_by')
+        payment_type = request.form.get('payment_type')
+        transaction_id = request.form.get('transaction_id')
+
         receipt = Receipt(
-            client_id=request.form.get('client_id'),
-            amount=float(request.form.get('amount') or 0),
-            method=request.form.get('method'),
-            reference=request.form.get('reference'),
-            description=request.form.get('description')
+          client_id=client_id,
+          amount=total_amount,
+          method=payment_type,
+          reference=transaction_id,
+          description=f"{final_description} | Issued by: {issued_by}"
         )
         db.session.add(receipt)
+        db.session.flush()
+
+        remaining = total_amount
+        bl_ids = request.form.getlist('bl_ids')
+
+        if bl_ids:
+            selected_bls = (
+                BL.query
+                .filter(BL.id.in_(bl_ids))
+                .order_by(BL.created_at.asc())
+                .all()
+            )
+
+            for bl in selected_bls:
+                if remaining <= 0:
+                    break
+
+                unpaid = (bl.amount_total or 0) - (bl.amount_paid or 0)
+                if unpaid <= 0:
+                    continue
+
+                applied = min(unpaid, remaining)
+                bl.amount_paid = (bl.amount_paid or 0) + applied
+                remaining -= applied
+
+                db.session.add(
+                    ReceiptBL(
+                        receipt_id=receipt.id,
+                        bl_id=bl.id,
+                        amount_applied=applied
+                    )
+                )
+
         db.session.commit()
 
-        return redirect(url_for('preview_receipt', receipt_id=receipt.id))
+        return redirect(
+            url_for('download_receipt_pdf', receipt_id=receipt.id)
+        )
+    backup_database()
 
-    return render_template_string(RECEIPT_HTML, clients=clients)
-@app.route('/receipt/preview/<int:receipt_id>')
+    # -------------------------
+    # RENDER PAGE (GET)
+    # -------------------------
+    return render_template_string(
+        RECEIPT_UI_HTML,
+        clients=clients,
+        bls=bls,
+        receipt=receipt,
+        selected_client_id=client_id
+    )
+
+@app.route('/receipts')
 @login_required
-def preview_receipt(receipt_id):
-    receipt = Receipt.query.get_or_404(receipt_id)
-    client = Client.query.get(receipt.client_id)
+def receipt_history():
+
+    q = request.args.get('q', '').strip()
+    date_str = request.args.get('date', '').strip()
+
+    # BASE QUERY (must exist first)
+    receipts = (
+        Receipt.query
+        .join(Client)
+        .order_by(Receipt.created_at.desc())
+    )
+
+    # DATE FILTER
+    if date_str:
+        try:
+            date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            receipts = receipts.filter(
+                db.func.date(Receipt.created_at) == date_obj
+            )
+        except ValueError:
+            pass
+
+    # TEXT / BL FILTER
+    if q:
+        receipts = (
+            receipts
+            .outerjoin(ReceiptBL)
+            .outerjoin(BL)
+            .filter(
+                (Client.name.ilike(f"%{q}%")) |
+                (Receipt.id.cast(db.String).ilike(f"%{q}%")) |
+                (BL.bl_number.ilike(f"%{q}%"))
+            )
+            .distinct()
+        )
+
+    receipts = receipts.all()
 
     return render_template_string(
-        RECEIPT_PREVIEW_HTML,
-        receipt=receipt,
-        client=client,
-        today=datetime.now().strftime("%d %b %Y")
-    )    
+        RECEIPT_HISTORY_HTML,
+        receipts=receipts,
+        q=q,
+        selected_date=date_str
+    )
 
-
-
-
+    return render_template_string(RECEIPTS_HOME_HTML)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
 from io import BytesIO
 from datetime import datetime
 from textwrap import wrap
 
+
+
+@app.route('/receipt/<int:receipt_id>/preview')
+@login_required
+def receipt_preview(receipt_id):
+
+    receipt = Receipt.query.get_or_404(receipt_id)
+    client = Client.query.get(receipt.client_id)
+
+    bl_rows = (
+        db.session.query(ReceiptBL, BL)
+        .join(BL, ReceiptBL.bl_id == BL.id)
+        .filter(ReceiptBL.receipt_id == receipt.id)
+        .all()
+    )
+
+    return render_template_string(
+        RECEIPT_PREVIEW_HTML,
+        receipt=receipt,
+        client=client,
+        bl_rows=bl_rows,
+        today=receipt.created_at.strftime("%d %b %Y")
+    )
+
+@app.route('/receipts')
+@login_required
+def receipts_home():
+    return render_template_string(RECEIPTS_HOME_HTML)
+
 @app.route('/receipt/pdf/<int:receipt_id>')
 @login_required
 def download_receipt_pdf(receipt_id):
+
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.lib import colors
+    from io import BytesIO
+    from datetime import datetime
+    import os
+    from reportlab.lib import colors
+    CARGOBLOC_TEAL = colors.HexColor("#9edfe0")
+
+
     receipt = Receipt.query.get_or_404(receipt_id)
     client = Client.query.get(receipt.client_id)
 
@@ -542,122 +971,199 @@ def download_receipt_pdf(receipt_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    # ===== BACKGROUND LETTERHEAD =====
-    bg_path = os.path.join('static', 'letterhead_receipt.png')
+    # ======================================================
+    # BACKGROUND (DRAW FIRST)
+    # ======================================================
+    bg_path = os.path.join('static', 'new_receipt.png')
     if os.path.exists(bg_path):
         bg = ImageReader(bg_path)
         c.drawImage(bg, 0, 0, width=width, height=height)
 
-    # ===== MATCH PREVIEW POSITIONS =====
-    # preview y from top → pdf y = height - y
+    # ======================================================
+    # HEADER
+    # ======================================================
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 11)
 
-    rno_x = 60
-    rno_y = height - 210
+    header_y = height - 205
+    c.drawString(60, header_y, f"Receipt No: CBL-{receipt.id:06d}")
+    c.drawRightString(
+        width - 60,
+        header_y,
+        receipt.created_at.strftime("%d %b %Y")
+    )
 
-    date_x = 460
-    date_y = height - 210
+    # ======================================================
+    # RECEIVED FROM + RECEIPT SUMMARY
+    # ======================================================
+    box_y = height - 310
+    box_h = 95
 
-    content_x = 60
-    content_y = height - 290
+    left_x = 60
+    right_x = width / 2 + 10
+    box_w = (width - 140) / 2
 
-    # ===== RECEIPT NO & DATE =====
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(rno_x, rno_y, f"Receipt No: {receipt.id:06d}")
+    teal = colors.HexColor("#7FD4D8")
 
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(date_x, date_y, datetime.now().strftime("%d %b %Y"))
+    # ----- RECEIVED FROM -----
+    # Header bar
+    c.setFillColor(teal)
+    c.rect(left_x, box_y + box_h - 26, box_w, 26, fill=1, stroke=0)
 
-    # ===== CONTENT BLOCK =====
-    line_height = 45
-    y = content_y
-
-    label_x = content_x
-    value_x = content_x + 120   # space after label
-
-    # ---- Client ----
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(label_x, y, "Client:")
-    c.setFont("Helvetica", 12)
-    c.drawString(value_x, y, client.name)
-    y -= line_height
-
-    # ---- Amount ----
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(label_x, y, "Amount:")
-    c.setFont("Helvetica", 12)
-    c.drawString(value_x, y, f"GHS {receipt.amount:,.2f}")
-    y -= line_height
-
-    # ---- Method ----
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(label_x, y, "Method:")
-    c.setFont("Helvetica", 12)
-    c.drawString(value_x, y, receipt.method or "-")
-    y -= line_height
-
-    # ---- Reference ----
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(label_x, y, "Reference:")
-    c.setFont("Helvetica", 12)
-    c.drawString(value_x, y, receipt.reference or "-")
-    y -= line_height
-
-    # ---- Description ----
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(label_x, y, "Description:")
-    y -= line_height
-
-    c.setFont("Helvetica", 12)
-    desc = receipt.description or "-"
-    from textwrap import wrap
-    wrapped = wrap(desc, 80)
-
-    for line in wrapped:
-        c.drawString(label_x, y, line)
-        y -= line_height
-
-    # ===== STAMP + SIGNATURE GROUP =====
-    # preview: right:120px, top:460px
-
-    group_right = 75
-    group_top = height - 560
-
-    stamp_w = 70
-    stamp_h = 70
-    sig_w = 70
-    sig_h = 20
-
-    stamp_x = width - group_right - stamp_w
-    stamp_y = group_top - stamp_h
-
-    sig_x = width - group_right - sig_w
-    sig_y = stamp_y + stamp_h + -60
-
-    # signature
-    sig_path = os.path.join('static', 'signature.png')
-    if os.path.exists(sig_path):
-        sig = ImageReader(sig_path)
-        c.drawImage(sig, sig_x, sig_y, width=sig_w, height=sig_h, mask='auto')
-
-    # stamp
-    stamp_path = os.path.join('static', 'stamp.png')
-    if os.path.exists(stamp_path):
-        stamp = ImageReader(stamp_path)
-        c.drawImage(stamp, stamp_x, stamp_y, width=stamp_w, height=stamp_h, mask='auto')
-
-    # line + manager name
-    line_w = stamp_w + 20
-    line_x = stamp_x - 10
-    line_y = stamp_y - 18
-
-    c.setLineWidth(0.8)
-    c.line(line_x, line_y, line_x + line_w, line_y)
-
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(line_x + line_w/2, line_y - 10, "Romeo Frimpong — Manager")
+    # Heading text (WHITE)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(left_x + 10, box_y + box_h - 18, "RECEIVED FROM")
     
 
-    # ===== FINISH =====
+    #line 
+    c.setStrokeColor(CARGOBLOC_TEAL)
+    c.setLineWidth(1)
+    c.rect(left_x, box_y, box_w, box_h, stroke=1, fill=0)
+    c.setFillColor(colors.black)
+
+    # Body text
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(left_x + 10, box_y + box_h - 45, client.name)
+
+    c.setFont("Helvetica", 10)
+    if client.phone:
+        c.drawString(left_x + 10, box_y + box_h - 65, f"Phone: {client.phone}")
+
+    if client.email:
+        c.drawString(left_x + 10, box_y + box_h - 82, f"Email: {client.email}")
+
+    # ----- RECEIPT SUMMARY -----
+    # Header bar
+    c.setFillColor(teal)
+    c.rect(right_x, box_y + box_h - 26, box_w, 26, fill=1, stroke=0)
+
+    # Heading text (WHITE)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(right_x + 10, box_y + box_h - 18, "RECEIPT SUMMARY")
+
+    # Box outline (CARGOBLOC BLUE)
+    c.setStrokeColor(CARGOBLOC_TEAL)
+    c.setLineWidth(1)
+    c.rect(right_x, box_y, box_w, box_h, stroke=1, fill=0)
+    c.setFillColor(colors.black)
+
+    # Body text
+    c.setFont("Helvetica", 10)
+    c.drawString(right_x + 10, box_y + box_h - 45, "Transaction ID:")
+    c.drawRightString(
+        right_x + box_w - 10,
+        box_y + box_h - 45,
+        receipt.reference or "—"
+    )
+
+    c.drawString(right_x + 10, box_y + box_h - 65, "Currency:")
+    c.drawRightString(right_x + box_w - 10, box_y + box_h - 65, "GHS")
+
+    c.drawString(right_x + 10, box_y + box_h - 82, "Payment Type:")
+    c.drawRightString(
+        right_x + box_w - 10,
+        box_y + box_h - 82,
+        receipt.method or "—"
+    )
+
+    # ======================================================
+    # PAYMENT BREAKDOWN TABLE
+    # ======================================================
+    col_w = [40, 200, 140, 100]
+    table_w = sum(col_w)
+    table_x = (width - table_w) / 2
+    table_y = height - 380
+    row_h = 28
+
+    # ----- TITLE BAR -----
+    c.setFillColor(teal)
+    c.rect(table_x, table_y + row_h, table_w, 26, fill=1, stroke=0)
+
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(table_x + 10, table_y + row_h + 8, "PAYMENT BREAKDOWN")
+
+    # ----- HEADER ROW -----
+    c.setFillColor(teal)
+    c.rect(table_x, table_y, table_w, row_h, fill=1, stroke=0)
+
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 10)
+
+    headers = ["#", "BL NUMBER", "DESCRIPTION", "AMOUNT (GHS)"]
+    x = table_x
+    for i, h in enumerate(headers):
+        c.drawString(x + 8, table_y + 9, h)
+        x += col_w[i]
+
+    # ----- CLEAN DESCRIPTION -----
+    raw_desc = receipt.description or ""
+    if "| Issued by:" in raw_desc:
+        clean_desc = raw_desc.split("| Issued by:")[0].strip()
+    else:
+        clean_desc = raw_desc.strip() or "-"
+
+    # ----- ROWS -----
+    c.setFont("Helvetica", 10)
+    y = table_y - row_h
+    total = 0
+
+    items = ReceiptBL.query.filter_by(receipt_id=receipt.id).all()
+
+    for idx, item in enumerate(items, start=1):
+        bl = BL.query.get(item.bl_id)
+        total += item.amount_applied
+
+        c.rect(table_x, y, table_w, row_h, stroke=1, fill=0)
+
+        vx = table_x
+        for w in col_w[:-1]:
+            vx += w
+            c.line(vx, y, vx, y + row_h)
+
+        x = table_x
+        c.drawString(x + 12, y + 9, str(idx))
+        x += col_w[0]
+
+        c.drawString(x + 8, y + 9, bl.bl_number)
+        x += col_w[1]
+
+        c.drawString(x + 8, y + 9, clean_desc)
+        x += col_w[2]
+
+        c.drawRightString(x + col_w[3] - 8, y + 9, f"{item.amount_applied:,.2f}")
+        y -= row_h
+
+    # ----- TOTAL ROW -----
+    c.setFillColor(colors.HexColor("#E6F4F5"))
+    c.rect(table_x, y, table_w, row_h, fill=1, stroke=1)
+
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(table_x + col_w[0] + col_w[1] + 8, y + 9, "TOTAL")
+    c.drawRightString(table_x + table_w - 8, y + 9, f"GHS {total:,.2f}")
+
+    # ======================================================
+    # FOOTER
+    # ======================================================
+    footer_y = 40
+    c.setLineWidth(1.4)
+    c.line(70, footer_y + 15, width - 70, footer_y + 15)
+
+    if "Issued by:" in raw_desc:
+        issued_by = raw_desc.split("Issued by:")[1].strip()
+    else:
+        issued_by = "-"
+
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(
+        width / 2,
+        footer_y,
+        f"Generated by: {issued_by} | CargoBloc System | {receipt.created_at.strftime('%d %b %Y')}"
+    )
+
     c.showPage()
     c.save()
     buffer.seek(0)
@@ -668,8 +1174,7 @@ def download_receipt_pdf(receipt_id):
         download_name=f"Receipt_{receipt.id:06d}.pdf",
         mimetype="application/pdf"
     )
-
-
+    
 # AttributeError: 'Receipt' object has no attribute 'client_name'
 # -----------------------
 # PDF helpers
@@ -1239,7 +1744,7 @@ button[type="submit"]:hover,
       <nav class="nav">
         <a href="#" class="active">Dashboard</a>
         <a href="{{ url_for('clients_page') }}">Clients</a>
-        <a href="{{ url_for('generate_receipt') }}">Receipts</a>
+        <a href="{{ url_for('receipts_home') }}">Receipts</a>
         <a href="{{ url_for('house_bl') }}">House BLs</a>
         <a href="{{ url_for('logout') }}">Logout</a>
       </nav>
@@ -1255,11 +1760,7 @@ button[type="submit"]:hover,
       <header class="top">
         <h1>Dashboard</h1>
         <div class="header-actions">
-          <form method="get" action="{{ url_for('home') }}" style="display:flex; gap:8px; align-items:center;">
-    <input name="q" placeholder="Search name or BL" value="{{ q or '' }}" style="padding:9px 12px; border-radius:8px; border:1px solid #e6eefb;">
-    <input type="date" name="date" value="{{ request.args.get('date', '') }}" style="padding:9px 12px; border-radius:8px; border:1px solid #e6eefb;">
-    <button type="submit" style="background:var(--accent); color:#fff; border:none; padding:9px 12px; border-radius:8px; font-weight:600;">Search</button>
-</form>
+          
         </div>
       </header>
 
@@ -1279,69 +1780,117 @@ button[type="submit"]:hover,
       </section>
 
       <section style="display:flex; gap:18px; flex-wrap:wrap;">
-        <div style="flex:0.45; min-width:320px;">
-          <div class="add-client">
-            <h4 style="margin:0 0 8px 0;">➕ Add New Client</h4>
-            <form method="post" action="{{ url_for('add_client') }}">
-              <input name="name" placeholder="Client Name" required>
-              <input name="email" placeholder="Email">
-              <input name="phone" placeholder="Phone">
-              <textarea name="notes" placeholder="Notes" rows="3"></textarea>
-              <button type="submit">Add Client</button>
-            </form>
-          </div>
 
-          <div style="margin-top:12px;">
-            <h4 style="margin:4px 0 8px 0;">Clients</h4>
-            <div class="client-list">
-              {% for c in clients %}
-              <div class="client-item">
-                <div class="meta">
-                  {{ c.name }} <small>{{ c.email or '-' }} • {{ c.phone or '-' }}</small>
-                </div>
-                <div class="client-actions">
-                  <a href="{{ url_for('client_detail', client_id=c.id) }}" class="open">Open</a>
-                  <a href="{{ url_for('delete_client', client_id=c.id) }}" class="delete" onclick="return confirm('Delete client?')">Delete</a>
-                </div>
-              </div>
-              {% endfor %}
-            </div>
-          </div>
+  <!-- LEFT COLUMN -->
+  <div style="flex:0.45; min-width:320px;">
+
+    <div class="add-client">
+      <h4 style="margin:0 0 8px 0;">➕ Add New Client</h4>
+      <form method="post" action="{{ url_for('add_client') }}">
+        <input name="name" placeholder="Client Name" required>
+        <input name="email" placeholder="Email">
+        <input name="phone" placeholder="Phone">
+        <textarea name="notes" placeholder="Notes" rows="3"></textarea>
+        <button type="submit">Add Client</button>
+      </form>
+    </div>
+
+    <div style="margin-top:12px;">
+      <h4 style="margin:4px 0 8px 0;">Clients</h4>
+
+      <!-- Short summary + link to full clients page -->
+      <div style="background:#fff; padding:12px; border-radius:10px; box-shadow:0 6px 18px rgba(3,7,18,0.04);">
+        <p style="margin:0 0 8px 0; color:#374151;">
+          Manage all clients on the dedicated Clients page.
+          <br><small style="color:#6b7280;">(Open, add BLs, export and more)</small>
+        </p>
+
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <a href="{{ url_for('clients_page') }}"
+             class="btn"
+             style="background:var(--accent); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
+             Open Clients Page
+          </a>
+
+          <a href="{{ url_for('client_detail', client_id=clients[0].id) if clients else url_for('generate_receipt') }}"
+             style="color:#2563eb; text-decoration:none; font-weight:600;">
+            Quick: Open first client
+          </a>
         </div>
+      </div>
+    </div>
 
-        <div style="flex:0.5; min-width:320px;">
-          <div class="card" style="margin-bottom:12px;">
-            <h4>Quick Actions</h4>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-              <a href="{{ url_for('home') }}" class="btn" style="background:var(--deep-blue); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">Refresh</a>
-              <a href="{{ url_for('export_all_filtered', date=request.args.get('date', '')) }}"
-   class="btn"
-   style="background:#fff; border:1px solid #e6eefb; padding:8px 12px; border-radius:8px; text-decoration:none; color:var(--text);">
-   Export All
-</a>
-              <a href="#" class="btn" style="background:var(--accent); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">New Report</a>
-            </div>
-          </div>
+  </div> <!-- ✅ END LEFT COLUMN -->
 
-          <div class="card">
-            <h4>Recent Activity</h4>
-            <div style="font-size:13px; color:#6b7280;">
-              {% for c in clients[:6] %}
-                <div style="padding:8px 0; border-bottom:1px dashed #eef6ff;">Added client: <strong>{{ c.name }}</strong></div>
-              {% else %}
-                <div>No recent activity</div>
-              {% endfor %}
-            </div>
-          </div>
-        </div>
-      </section>
+
+  <!-- RIGHT COLUMN -->
+  <div style="flex:0.5; min-width:320px;">
+
+    <div class="card" style="margin-bottom:12px;">
+      <h4>Quick Actions</h4>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <a href="{{ url_for('home') }}" class="btn"
+           style="background:var(--deep-blue); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
+           Refresh
+        </a>
+
+        <a href="{{ url_for('export_all_filtered', date=request.args.get('date', '')) }}"
+           class="btn"
+           style="background:#fff; border:1px solid #e6eefb; padding:8px 12px; border-radius:8px; text-decoration:none; color:var(--text);">
+          Export All
+        </a>
+
+        <a href="#" class="btn"
+           style="background:var(--accent); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
+          New Report
+        </a>
+      </div>
+    </div>
+
+    <!-- ✅ RECENT ACTIVITY (NOW STAYS ON RIGHT) -->
+    <div class="card">
+  <h4>Recent Activity</h4>
+
+  <div style="
+    font-size:13px;
+    color:#374151;
+    max-height:280px;
+    overflow-y:auto;
+    padding-right:6px;
+  ">
+
+    {% for a in activities %}
+      <div style="
+        padding:10px 0;
+        border-bottom:1px dashed #eef6ff;
+        display:flex;
+        flex-direction:column;
+        gap:2px;
+      ">
+        <span>{{ a.text }}</span>
+        {% if a.time %}
+  <small style="color:#9ca3af;">
+    {{ a.time.strftime("%d %b %Y • %H:%M") }}
+  </small>
+{% endif %}
+      </div>
+    {% else %}
+      <div style="color:#9ca3af;">No recent activity</div>
+    {% endfor %}
+
+  </div>
+</div>
+
+  </div> <!-- ✅ END RIGHT COLUMN -->
+
+</section>
 {% if selected_date %}
 <p style="margin:0 0 10px 0; color:#4b5563; font-size:13px;">
   Showing BLs added on <strong>{{ selected_date }}</strong>
 </p>
 {% endif %}
 
-      <footer>© 2025 CargoBloc Logistics — Vision to reality</footer>
+      <footer>© 2026 CargoBloc Logistics — Vision to reality</footer>
     </main>
   </div>
 </body>
@@ -1353,6 +1902,20 @@ CLIENT_HTML = """<!doctype html>
 <title>Client Overview — {{ client.name }}</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 <style>
+  .container {
+  animation: fadeIn 0.35s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
   :root {
     --blue: #2563eb;
     --accent: #00AEEF;
@@ -1529,6 +2092,18 @@ CLIENT_HTML = """<!doctype html>
     padding:10px;
     border-bottom:1px solid #e5e7eb;
   }
+  .bl-row {
+  width: 100%;
+  box-sizing: border-box;
+  }
+  .bl-row.unpaid {
+  background: rgba(220, 38, 38, 0.06);
+  border-left: 4px solid #dc2626;
+  }
+
+  .bl-row.unpaid strong {
+  color: #991b1b;
+  }
 
   footer {
     text-align:center;
@@ -1542,6 +2117,25 @@ CLIENT_HTML = """<!doctype html>
     border-radius:6px;
     padding:6px 8px;
   }
+  .bl-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+/* smooth scrollbar */
+.bl-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.bl-scroll::-webkit-scrollbar-thumb {
+  background: rgba(37,99,235,0.35);
+  border-radius: 10px;
+}
+.bl-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 </style>
 </head>
 <body>
@@ -1550,12 +2144,54 @@ CLIENT_HTML = """<!doctype html>
       <img src="{{ url_for('static', filename='logo.png') }}" alt="CargoBloc Watermark">
     </div>
 
-    <a href="{{ url_for('home') }}" class="action-btn back">← Back</a>
+    <a href="{{ url_for('clients_page') }}" class="action-btn back">← Back</a>
     <h1 style="display:flex; justify-content:center; align-items:center; gap:10px;">
   Client Overview
   <button type="button" onclick="toggleEditClient()" class="action-btn upload" style="padding:6px 12px; font-size:13px;">✏ Edit</button>
 </h1>
     <p class="meta">{{ client.name }} • {{ client.email or '-' }} • {{ client.phone or '-' }}</p>
+    <div class="card" style="display:flex; gap:16px; flex-wrap:wrap; text-align:center;">
+
+  <div style="flex:1; min-width:140px;">
+    <small>Total Billed</small>
+    <h3 style="margin:4px 0;">₵{{ '%.2f'|format(total_billed) }}</h3>
+  </div>
+
+  <div style="flex:1; min-width:140px;">
+    <small>Total Paid</small>
+    <h3 style="margin:4px 0; color:#16a34a;">₵{{ '%.2f'|format(total_paid) }}</h3>
+  </div>
+
+  <div style="flex:1; min-width:140px;">
+    <small>Outstanding</small>
+    <h3 style="margin:4px 0; color:#dc2626;">₵{{ '%.2f'|format(total_unpaid) }}</h3>
+  </div>
+
+  <div style="flex:1; min-width:140px;">
+    <small>Status</small><br>
+    <span style="
+      display:inline-block;
+      margin-top:6px;
+      padding:4px 12px;
+      border-radius:999px;
+      font-size:13px;
+      font-weight:600;
+      background:
+        {% if finance_status == 'Cleared' %}#dcfce7
+        {% elif finance_status == 'Part Paid' %}#fef9c3
+        {% elif finance_status == 'Owing' %}#fee2e2
+        {% else %}#e5e7eb{% endif %};
+      color:
+        {% if finance_status == 'Cleared' %}#166534
+        {% elif finance_status == 'Part Paid' %}#854d0e
+        {% elif finance_status == 'Owing' %}#991b1b
+        {% else %}#374151{% endif %};
+    ">
+      {{ finance_status }}
+    </span>
+  </div>
+
+</div>
 <div id="editClientForm" style="display:none; margin:15px auto 10px; max-width:400px; background:rgba(255,255,255,0.95); border-radius:10px; padding:14px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
   <form method="post">
     <input type="hidden" name="action" value="edit_client">
@@ -1568,20 +2204,29 @@ CLIENT_HTML = """<!doctype html>
 </div>
 
 <script>
-function toggleEditClient() {
-  const f = document.getElementById('editClientForm');
+function toggleForm() {
+  const f = document.getElementById('addBlForm');
   f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
+  document.getElementById('uploadBlForm').style.display = 'none';
+  document.getElementById('addMultiBlForm').style.display = 'none';
+}
+
+function toggleUpload() {
+  const f = document.getElementById('uploadBlForm');
+  f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
+  document.getElementById('addBlForm').style.display = 'none';
+  document.getElementById('addMultiBlForm').style.display = 'none';
+}
+
+function toggleMultiBl() {
+  const f = document.getElementById('addMultiBlForm');
+  f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
+  document.getElementById('addBlForm').style.display = 'none';
+  document.getElementById('uploadBlForm').style.display = 'none';
 }
 </script>
 
-    <div class="card">
-      <h3 style="display:flex; justify-content:space-between; align-items:center;">
-        <span>BL List</span>
-        <span style="display:flex; gap:8px;">
-          <button type="button" onclick="toggleForm()" class="action-btn add">➕ Add BL</button>
-          <button type="button" onclick="toggleUpload()" class="action-btn upload"> Upload BL</button>
-        </span>
-      </h3>
+  
 
       <!-- Add BL Form -->
       <div id="addBlForm" style="display:none; margin-top:10px; background:rgba(255,255,255,0.95); border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
@@ -1589,11 +2234,50 @@ function toggleEditClient() {
           <input type="hidden" name="action" value="add_bl">
           <input name="bl_number" placeholder="BL Number" required>
           <input name="amount_total" placeholder="Total Amount" type="number" step="0.01" required>
-          <input name="amount_paid" placeholder="Amount Paid" type="number" step="0.01">
           <input type="file" name="bl_document" accept=".pdf,.jpg,.png,.docx">
           <button type="submit" class="action-btn add" style="margin-top:6px;">Save</button>
         </form>
       </div>
+    
+     <!-- ADD MULTIPLE BLs (ROW BASED) -->
+<div id="addMultiBlForm" style="display:none; margin-top:10px; background:#fff; border-radius:10px; padding:14px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+  <form method="post">
+    <input type="hidden" name="action" value="add_multi_bl">
+
+    <div id="multiBlRows">
+      <div class="multi-bl-row" style="display:flex; gap:8px; margin-bottom:8px;">
+        <input name="bl_number[]" placeholder="BL Number" required style="flex:2;">
+        <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1;">
+      </div>
+    </div>
+
+    <button type="button" onclick="addBlRow()" class="action-btn upload" style="margin-top:6px;">
+      ➕ Add another BL
+    </button>
+
+    <button type="submit" class="action-btn add" style="margin-top:10px;">
+      Save All BLs
+    </button>
+  </form>
+</div>
+
+<script>
+function addBlRow() {
+  const container = document.getElementById('multiBlRows');
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.marginBottom = '8px';
+
+  row.innerHTML = `
+    <input name="bl_number[]" placeholder="BL Number" required style="flex:2;">
+    <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1;">
+  `;
+  container.appendChild(row);
+}
+</script>
+    
 
       <!-- Upload BL Form -->
       <div id="uploadBlForm" style="display:none; margin-top:10px; background:rgba(255,255,255,0.95); border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
@@ -1624,48 +2308,120 @@ function toggleEditClient() {
         </div>
       {% endif %}
 
-      <form method="post">
-        <input type="hidden" name="action" value="export_selected_bl">
-        {% for bl in client.bls %}
-        <div class="bl-row">
-          <div class="bl-meta">
-            <input type="checkbox" name="bl_ids" value="{{ bl.id }}">
-            <strong>BL: {{ bl.bl_number }}</strong><br>
-            <small>Total ₵{{ bl.amount_total }} | Paid ₵{{ bl.amount_paid }} | Unpaid ₵{{ bl.amount_unpaid }}</small>
-          </div>
-          <div>
-            {% if bl.document %}
-              <a href="{{ url_for('uploaded_file', filename=bl.document) }}" target="_blank" class="icon-btn blue" title="View Document">
-                <img src="{{ url_for('static', filename='icon_view.png') }}" alt="View" style="width:18px; height:18px;">
-              </a>
-            {% endif %}
-            <form method="post" style="display:inline;">
-              <input type="hidden" name="action" value="record_payment">
-              <input type="hidden" name="bl_id" value="{{ bl.id }}">
-              <input name="extra_payment" placeholder="₵ amount" style="width:90px;">
-              <button class="icon-btn green" title="Record Payment">
-                <img src="{{ url_for('static', filename='icon_pay.png') }}" alt="Pay" style="width:18px; height:18px;">
-              </button>
-            </form>
-            <a href="{{ url_for('delete_bl', bl_id=bl.id) }}" class="icon-btn red" title="Delete BL" onclick="return confirm('Delete this BL?')">
-              <img src="{{ url_for('static', filename='icon_delete.png') }}" alt="Delete" style="width:18px; height:18px;">
-            </a>
-          </div>
+      <!-- ===== START: BL list + export (no nested forms) ===== -->
+<div class="card">
+  <h3 style="display:flex; justify-content:space-between; align-items:center;">
+    <span>BL List</span>
+    <span style="display:flex; gap:8px;">
+      <button type="button" onclick="toggleForm()" class="action-btn add">➕ Add BL</button>
+      <button type="button" onclick="toggleMultiBl()" class="action-btn add">➕➕ Add Multiple BLs</button>
+      <button type="button" onclick="toggleUpload()" class="action-btn upload">Upload BL</button>
+    </span>
+  </h3>
+  <div style="display:flex; gap:10px; align-items:center; margin:10px 0 14px;">
+  <input
+    type="text"
+    id="blSearch"
+    placeholder="Search BL…"
+    style="
+      width:260px;
+      padding:8px 10px;
+      border-radius:8px;
+      border:1px solid #d1d5db;
+      font-size:14px;
+    "
+    oninput="filterClientBLs()">
+
+  <button
+    type="button"
+    onclick="toggleUnpaidOnly()"
+    class="action-btn upload"
+    style="padding:6px 14px; font-size:13px;">
+    Unpaid
+  </button>
+</div>
+
+  <!-- 🔽 SCROLL CONTAINER START -->
+  <div class="bl-scroll">
+
+    <form id="exportForm" method="post">
+      <input type="hidden" name="action" value="export_selected_bl">
+
+      {% for bl in client.bls %}
+      <div class="bl-row {% if bl.amount_unpaid > 0 %}unpaid{% endif %}">
+        <input type="checkbox" name="bl_ids" value="{{ bl.id }}">
+
+        <div style="flex:1;">
+          <strong>{{ bl.bl_number }}</strong><br>
+          Outstanding: ₵{{ "%.2f"|format(bl.amount_unpaid) }}
         </div>
-        {% else %}
-          <p>No BLs yet.</p>
-        {% endfor %}
-        <button type="submit" class="action-btn export" style="margin-top:10px;"> Export Selected BLs</button>
-      </form>
+
+        <div style="display:flex; gap:8px;">
+          {% if bl.document %}
+          <a href="{{ url_for('uploaded_file', filename=bl.document) }}"
+             target="_blank"
+             class="icon-btn blue">
+            <img src="{{ url_for('static', filename='icon_view.png') }}" width="18">
+          </a>
+          {% endif %}
+
+          <a href="{{ url_for('delete_bl', bl_id=bl.id) }}"
+             class="icon-btn red"
+             onclick="return confirm('Delete this BL?')">
+            <img src="{{ url_for('static', filename='icon_delete.png') }}" width="18">
+          </a>
+        </div>
+      </div>
+      {% else %}
+      <p>No BLs yet.</p>
+      {% endfor %}
+
+      <div style="margin-top:12px;">
+        <button type="submit" class="action-btn export">Export Selected BLs</button>
+      </div>
+    </form>
+
+  </div>
+  <!-- 🔼 SCROLL CONTAINER END -->
+
+  <div style="margin-top:10px;">
+    <a href="{{ url_for('export_client_pdf', client_id=client.id) }}" class="action-btn export">Export All</a>
+  </div>
+</div>
+
+<!-- ===== END: BL list + export ===== -->
+
     </div>
 
     <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
-      <a href="{{ url_for('export_client_pdf', client_id=client.id) }}" class="action-btn export"> Export All</a>
       <p style="color:#4b5563;">Notes: {{ client.notes or '—' }}</p>
     </div>
 
-    <footer>© 2025 CargoBloc Logistics — Vision to Reality </footer>
+    <footer>© 2026 CargoBloc Logistics — Vision to Reality </footer>
   </div>
+  <script>
+function filterClientBLs() {
+  const q = document.getElementById('blSearch').value.toLowerCase();
+
+  document.querySelectorAll('.bl-row').forEach(row => {
+    const text = row.innerText.toLowerCase();
+    row.style.display = text.includes(q) ? 'flex' : 'none';
+  });
+}
+let unpaidOnly = false;
+
+function toggleUnpaidOnly(){
+  unpaidOnly = !unpaidOnly;
+
+  document.querySelectorAll('.bl-row').forEach(row => {
+    if(!unpaidOnly){
+      row.style.display = 'flex';
+      return;
+    }
+    row.style.display = row.classList.contains('unpaid') ? 'flex' : 'none';
+  });
+}
+</script>
 </body>
 </html>"""
 CLIENTS_PAGE_HTML = """<!doctype html>
@@ -1691,15 +2447,29 @@ CLIENTS_PAGE_HTML = """<!doctype html>
   }
   h1{color:#2563eb;margin:0 0 14px;}
   .top{
-    display:flex; gap:10px; margin-bottom:14px;
-  }
-  input{
-    flex:1; padding:10px; border-radius:8px; border:1px solid #d1d5db;
-  }
-  button{
-    padding:10px 16px; border:none; border-radius:8px;
-    background:#2563eb; color:#fff; font-weight:600; cursor:pointer;
-  }
+  display:flex;
+  gap:10px;
+  margin-bottom:14px;
+  flex-wrap:wrap;
+}
+
+.top input{
+  flex:1 1 220px;
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+}
+
+.top button{
+  flex:0 0 auto;
+  padding:10px 16px;
+  border:none;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
+}
   .list{margin-top:16px;}
   .item{
     display:flex; justify-content:space-between; align-items:center;
@@ -1719,20 +2489,54 @@ CLIENTS_PAGE_HTML = """<!doctype html>
   <div class="wrap">
     <a href="{{ url_for('home') }}" class="back">← Back to Dashboard</a>
     <h1>Clients</h1>
+    <p style="color:#6b7280; margin:0 0 10px;">
+      Showing {{ clients|length }} client{{ '' if clients|length == 1 else 's' }}
+    </p>
+    
 
-    <form class="top" method="get">
-      <input name="q" placeholder="Search client..." value="{{ q or '' }}">
-      <button type="submit">Search</button>
-    </form>
+
+
+    <form class="top" method="get" style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+
+  <input name="q"
+         placeholder="Search client name or BL number..."
+         value="{{ q or '' }}"
+         style="flex:2;">
+
+  <input type="date"
+         name="date"
+         value="{{ selected_date or '' }}"
+         style="flex:1;">
+
+  <button type="submit">Search</button>
+
+  {% if q or selected_date %}
+    <a href="{{ url_for('clients_page') }}"
+       style="align-self:center; text-decoration:none; color:#2563eb; font-weight:600;">
+       Clear
+    </a>
+  {% endif %}
+
+</form>
 
     <div class="list">
-      {% for c in clients %}
+      {% for row in clients %}
+      {% set c = row.client %}
       <div class="item">
         <div class="meta">
           <strong>{{ c.name }}</strong><br>
-          <small>{{ c.email or '-' }} • {{ c.phone or '-' }}</small>
+        <small>
+         {{ c.email or '-' }} • {{ c.phone or '-' }}<br>
+          BLs: {{ c.bls|length }} |
+          Owed: ₵{{ '%.2f'|format(row.unpaid) }}
+       </small>
         </div>
-        <a class="open" href="{{ url_for('client_detail', client_id=c.id) }}">Open</a>
+  <div style="display:flex; gap:8px;">
+    <a class="open" href="{{ url_for('client_detail', client_id=c.id) }}">Open</a>
+    <a href="{{ url_for('delete_client', client_id=c.id) }}"
+       style="background:#dc2626;color:#fff;padding:6px 12px;border-radius:8px;text-decoration:none;font-weight:600;"
+       onclick="return confirm('Delete this client?')">Delete</a>
+  </div>
       </div>
       {% else %}
         <p>No clients found.</p>
@@ -1998,333 +2802,957 @@ FORGOT_HTML = """<!doctype html>
 <footer>© 2025 CargoBloc Logistics</footer>
 </body>
 </html>"""
-RECEIPT_HTML = """<!doctype html>
-<html lang="en">
+RECEIPT_UI_HTML = """
+<!doctype html>
+<html>
 <head>
 <meta charset="utf-8">
-<title>Generate Receipt - CargoBloc</title>
-<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+<title>Generate Receipt</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
 <style>
-  body {
-    font-family: 'Poppins', sans-serif;
-    background: url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
-    background-size: cover;
-    margin: 0; padding: 0;
-    color: #0b1220;
-  }
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+}
 
-  .container {
-    max-width: 800px;
-    margin: 40px auto;
-    background: rgba(255,255,255,0.95);
-    border-radius: 16px;
-    padding: 28px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-  }
+.container{
+  max-width:1200px;
+  margin:40px auto;
+  background:rgba(255,255,255,0.96);
+  border-radius:18px;
+  padding:30px;
+}
 
-  /* Letterhead */
-  .letterhead {
-    text-align: center;
-    margin-bottom: 20px;
-  }
-  .letterhead img {
-    height: 80px;
-  }
-  .letterhead h2 {
-    margin: 5px 0;
-    color: #2563eb;
-    font-size: 22px;
-  }
-  .letterhead p {
-    margin: 0;
-    font-size: 13px;
-    color: #374151;
-  }
-  .letterhead hr {
-    margin: 15px 0;
-    border: 1px solid #2563eb;
-  }
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
 
-  h1 {
-    text-align: center;
-    color: #2563eb;
-    margin-bottom: 20px;
-  }
+h1{ color:#2563eb; margin:0; }
 
-  form {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-  }
-  input, select, textarea {
-    width: 100%;
-    padding: 10px;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    box-sizing: border-box;
-  }
-  textarea { grid-column: 1 / -1; resize: vertical; }
+.btn{
+  background:#2563eb;
+  color:#fff;
+  border:none;
+  padding:10px 16px;
+  border-radius:10px;
+  font-weight:600;
+  cursor:pointer;
+  text-decoration:none;
+}
 
-  button {
-    grid-column: 1 / -1;
-    background: linear-gradient(135deg,#007BFF,#00AEEF);
-    color: white; font-weight: 600;
-    border: none; border-radius: 8px;
-    padding: 12px; cursor: pointer;
-    transition: all .2s ease;
-  }
-  button:hover { transform: translateY(-2px); }
+.layout{
+  display:grid;
+  grid-template-columns: 2fr 1fr;
+  gap:30px;
+  margin-top:25px;
+}
 
-  a.back {
-    display: inline-block; margin-bottom: 12px;
-    color: #2563eb; text-decoration: none; font-weight: 600;
-  }
+.card{
+  background:#fff;
+  border-radius:14px;
+  padding:20px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.06);
+}
 
-  /* Receipt card */
-  .receipt {
-    background: #fff;
-    padding: 25px;
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    margin-top: 30px;
-  }
-  .receipt h3 {
-    text-align: center;
-    color: #2563eb;
-    margin-bottom: 20px;
-  }
-  .receipt p {
-    margin: 6px 0;
-    font-size: 14px;
-  }
-  .receipt .stamp {
-    text-align: right;
-    margin-top: 50px;
-  }
-  .receipt .stamp img {
-    height: 80px;
-  }
+.card h3{
+  margin-top:0;
+  color:#2563eb;
+}
 
-  .print-btn {
-    margin-bottom: 20px;
-    background: #2563eb;
-    color: #fff;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-  }
+label{
+  font-size:13px;
+  font-weight:600;
+  display:block;
+  margin-top:14px;
+}
 
-  /* Print styles */
-  @media print {
-  body { background: none; color: #000; }
-  .container { box-shadow: none; margin:0; max-width:100%; }
-  button, input, select, textarea { display: none; }
+input, select{
+  width:100%;
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+  margin-top:6px;
+}
 
-  /* Make sure letterhead and stamp images print */
-  .letterhead, .receipt .stamp {
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.bl-search{
+  margin-bottom:14px;
+}
+
+
+/* ===== BL CHECKLIST STYLE ===== */
+
+.bl-list{
+  border:1px solid #e5e7eb;
+  border-radius:12px;
+  max-height:340px;
+  overflow-y:auto;
+  background:#fff;
+}
+
+.bl-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:12px 16px;
+  cursor:pointer;
+  transition:background 0.15s ease;
+}
+
+.bl-item:hover{
+  background:#f1f5f9;
+}
+
+.bl-left{
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+
+.bl-item input[type="checkbox"]{
+  width:18px;
+  height:18px;
+}
+
+.bl-text{
+  display:flex;
+  flex-direction:column;
+}
+
+.bl-number{
+  font-weight:500;
+  color:#111827;
+}
+
+.bl-sub{
+  font-size:12px;
+  color:#6b7280;
+}
+
+.bl-status{
+  font-size:12px;
+  padding:4px 10px;
+  border-radius:999px;
+  background:#fef3c7;
+  color:#92400e;
+  white-space:nowrap;
+}
+
+
+.bl-meta{
+  flex:1;
+}
+
+.badge{
+  font-size:11px;
+  background:#fef3c7;
+  color:#92400e;
+  padding:4px 6px;
+  border-radius:6px;
+  display:inline-block;
+  margin-top:6px;
+}
+
+.summary{
+  background:#f8fafc;
+  border-radius:10px;
+  padding:14px;
+  margin-top:16px;
+  font-size:14px;
+}
+
+.summary strong{
+  color:#111827;
 }
 </style>
 </head>
+
 <body>
 <div class="container">
-  <a href="{{ url_for('home') }}" class="back">← Back to Dashboard</a>
-  
-  <div class="letterhead">
-    <img src="{{ url_for('static', filename='logo.png') }}" alt="CargoBloc Logo">
-    <h2>CargoBloc Logistics</h2>
-    <p>Vision to Reality • 123 Port Street, Accra, Ghana</p>
-    <hr>
+
+<!-- HEADER -->
+<div class="header">
+  <h1>Generate Receipt</h1>
+  <a href="{{ url_for('receipt_history') }}" class="btn">← Back</a>
+</div>
+
+<!-- CLIENT SELECT -->
+<form method="get" style="margin-top:20px;">
+  <label>Select Client</label>
+  <select name="client_id" onchange="this.form.submit()">
+    <option value="">-- choose client --</option>
+    {% for c in clients %}
+      <option value="{{ c.id }}" {% if selected_client_id == c.id %}selected{% endif %}>
+        {{ c.name }}
+      </option>
+    {% endfor %}
+  </select>
+</form>
+
+{% if bls %}
+<form method="post" class="layout">
+
+<input type="hidden" name="client_id" value="{{ selected_client_id }}">
+
+<!-- ================= LEFT: BL LIST ================= -->
+<div class="card">
+  <h3>Client BLs</h3>
+
+  <!-- Search + Filters (CARGOBLOC) -->
+  <div style="
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:14px;
+  ">
+
+    <input class="bl-search"
+           placeholder="Search BL number…"
+           id="blSearchInput"
+           style="flex:1;">
+
+    <button type="button"
+            class="btn"
+            onclick="filterBLs(document.getElementById('blSearchInput').value)">
+      Search
+    </button>
+
+    <!-- Unpaid filter pill -->
+    <div id="unpaidFilter"
+         onclick="toggleUnpaidFilter()"
+         style="
+           padding:6px 12px;
+           border-radius:999px;
+           font-size:12px;
+           font-weight:500;
+           cursor:pointer;
+           border:1px solid #cbd5e1;
+           color:#334155;
+           background:#f8fafc;
+           white-space:nowrap;
+         ">
+      Unpaid only
+    </div>
+
   </div>
 
-  <h1>Generate New Receipt</h1>
+  <div class="bl-list" id="blList">
 
-  <form method="post">
-    <label>Client:</label>
-    <select name="client_id" required>
-      {% for c in clients %}
-        <option value="{{ c.id }}">{{ c.name }}</option>
-      {% endfor %}
-    </select>
+  {% for bl, last_date in bls %}
+  <label class="bl-item">
 
-    <label>Amount (₵):</label>
-    <input type="number" step="0.01" name="amount" placeholder="Enter amount" required>
+    <div class="bl-left">
+      <input type="checkbox"
+             name="bl_ids"
+             value="{{ bl.id }}"
+             data-unpaid="{{ bl.amount_unpaid }}"
+             onchange="updateSummary()">
 
-    <label>Payment Method:</label>
-    <input name="method" placeholder="Cash / Bank Transfer / MoMo" required>
+      <div class="bl-text">
+        <div class="bl-number">
+          BL {{ bl.bl_number }}
+        </div>
+        <div class="bl-sub">
+          Outstanding: ₵{{ "%.2f"|format(bl.amount_unpaid) }}
+        </div>
+      </div>
+    </div>
 
-    <label>Reference / Transaction ID:</label>
-    <input name="reference" placeholder="e.g. TXN123456">
+    {% if last_date %}
+      <div class="bl-status">
+        Receipted • {{ last_date.strftime("%d %b %Y") }}
+      </div>
+    {% endif %}
 
-    <label>Description:</label>
-    <textarea name="description" placeholder="Purpose of payment or BL reference"></textarea>
+  </label>
+  {% endfor %}
 
-    <button type="submit">Generate Receipt</button>
-  </form>
-
-  {% if receipt %}
-<button class="print-btn" onclick="window.print()">🖨 Print Receipt</button>
-
-<div class="receipt" style="
-  
-    .preview{
-   position:relative;
-   background: url('{{ url_for("static", filename="letterhead_receipt.png") }}') no-repeat;
-   background-size: 100% auto;
-   width: 100%;
-   height: 1120px;
-   border-radius: 6px;
-   overflow: hidden;
-   }  
-     
-     
-">
-  <h3 style="text-align:center; color:#2563eb; margin-bottom:30px;">Payment Receipt</h3>
-
-  <p><strong>Receipt No:</strong> {{ receipt.id or '---' }}</p>
-  <p><strong>Date:</strong> {{ receipt.date or now }}</p>
-  <p><strong>Client:</strong> {{ receipt.client.name }}</p>
-  <p><strong>Amount Paid:</strong> ₵{{ receipt.amount }}</p>
-  <p><strong>Payment Method:</strong> {{ receipt.method }}</p>
-  <p><strong>Reference / Txn ID:</strong> {{ receipt.reference or '-' }}</p>
-  <p><strong>Description:</strong> {{ receipt.description or '-' }}</p>
-
-  <!-- Stamp (optional if it's already in the letterhead) -->
-  <div class="stamp" style="position:absolute; bottom:50px; right:50px;">
-    <img src="{{ url_for('static', filename='signature.png') }}" alt="Signature">
-    <img src="{{ url_for('static', filename='stamp.png') }}" alt="Stamp">
   </div>
 </div>
+
+<!-- ================= RIGHT: RECEIPT INFO ================= -->
+<div class="card">
+  <h3>Receipt Info</h3>
+
+  <label>Total Amount Received</label>
+  <input type="number"
+         step="0.01"
+         name="amount"
+         id="totalAmount"
+         readonly
+         required>
+
+  <label style="margin-top:14px;">Description</label>
+  <select name="description_type" onchange="toggleCustomDesc(this.value)">
+    <option value="Amendment">Amendment</option>
+    <option value="Manifest">Manifest</option>
+    <option value="custom">Custom</option>
+  </select>
+
+  <input name="custom_description"
+         id="customDesc"
+         placeholder="Enter custom description"
+         style="margin-top:8px; display:none;">
+
+  <label style="margin-top:12px;">Payment Type</label>
+<select name="payment_type"
+        id="paymentType"
+        onchange="handlePaymentType()"
+        required>
+  <option value="">Select payment type</option>
+  <option value="Mobile Money">Mobile Money</option>
+  <option value="Bank">Bank</option>
+  <option value="Cash">Cash</option>
+</select>
+
+<label style="margin-top:12px; display:none;" id="txLabel">
+  Transaction ID
+</label>
+<input name="transaction_id"
+       id="transactionId"
+       placeholder="e.g. MTN-99288321 or Bank Ref"
+       style="margin-bottom:6px; display:none;">
+
+  <!-- ===== SUMMARY ===== -->
+  <div id="summary" style="
+    background:#f8fafc;
+    border-radius:10px;
+    padding:12px;
+    margin-bottom:14px;
+    font-size:13px;
+  ">
+    <div><strong>Selected BLs:</strong> <span id="blCount">0</span></div>
+    <div><strong>Total Outstanding:</strong> ₵<span id="blTotal">0.00</span></div>
+  </div>
+
+  <button class="btn"
+          style="margin-top:20px;width:100%;">
+    Generate Receipt
+  </button>
+</div>
+
+</form>
 {% endif %}
+
 </div>
+
+<script>
+function filterBLs(q){
+  q = q.toLowerCase();
+
+  document.querySelectorAll('#blList .bl-item').forEach(item => {
+    const text = item.innerText.toLowerCase();
+    item.style.display = text.includes(q) ? 'flex' : 'none';
+  });
+}
+
+function toggleCustomDesc(val){
+  document.getElementById('customDesc').style.display =
+    val === 'custom' ? 'block' : 'none';
+}
+
+function updateSummary(){
+  let total = 0;
+  let count = 0;
+
+  document.querySelectorAll('input[name="bl_ids"]:checked').forEach(cb => {
+    total += parseFloat(cb.dataset.unpaid || 0);
+    count++;
+  });
+
+  document.getElementById('blCount').innerText = count;
+  document.getElementById('blTotal').innerText = total.toFixed(2);
+  document.getElementById('totalAmount').value = total.toFixed(2);
+}
+
+let unpaidOnly = false;
+
+function toggleUnpaidFilter(){
+  unpaidOnly = !unpaidOnly;
+
+  const pill = document.getElementById('unpaidFilter');
+
+  if(unpaidOnly){
+    pill.style.background = '#e6f4f5';
+    pill.style.borderColor = '#9edfe0';
+    pill.style.color = '#0f766e';
+  }else{
+    pill.style.background = '#f8fafc';
+    pill.style.borderColor = '#cbd5e1';
+    pill.style.color = '#334155';
+  }
+
+  filterUnpaidBLs();
+}
+
+function filterUnpaidBLs(){
+  document.querySelectorAll('.bl-item').forEach(item => {
+    const unpaid = parseFloat(
+      item.querySelector('input[name="bl_ids"]').dataset.unpaid || 0
+    );
+
+    if(unpaidOnly){
+      item.style.display = unpaid > 0 ? 'flex' : 'none';
+    }else{
+      item.style.display = 'flex';
+    }
+  });
+}
+function handlePaymentType(){
+  const type = document.getElementById('paymentType').value;
+  const tx = document.getElementById('transactionId');
+  const label = document.getElementById('txLabel');
+
+  if(type === 'Mobile Money' || type === 'Bank'){
+    tx.style.display = 'block';
+    label.style.display = 'block';
+    tx.required = true;
+  } else {
+    tx.style.display = 'none';
+    label.style.display = 'none';
+    tx.required = false;
+    tx.value = '';
+  }
+}
+</script>
 </body>
 </html>"""
 
+RECEIPT_HISTORY_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Receipts</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+}
+
+.container{
+  max-width:1150px;
+  margin:40px auto;
+  background:rgba(255,255,255,0.96);
+  border-radius:18px;
+  padding:28px 30px 34px;
+}
+
+.back-btn{
+  background:#2563eb;
+  color:#fff;
+  padding:10px 14px;
+  border-radius:10px;
+  font-weight:600;
+  text-decoration:none;
+}
+
+.tabs{
+  display:flex;
+  gap:20px;
+  margin:20px 0 10px;
+  border-bottom:1px solid #e5e7eb;
+}
+
+.tab{
+  padding-bottom:10px;
+  font-weight:600;
+  color:#6b7280;
+  text-decoration:none;
+  cursor:pointer;
+}
+
+.tab.active{
+  color:#2563eb;
+  border-bottom:3px solid #2563eb;
+}
+/* ===== HEADER ===== */
+
+.back-btn{
+  background:#2563eb;
+  color:#ffffff;
+}
+
+.back-btn:hover{
+  background:#1d4ed8;
+}
+
+
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:6px;
+}
+
+.header h1{
+  margin:0;
+  color:#2563eb;
+  font-size:26px;
+}
+
+.subtitle{
+  font-size:13px;
+  color:#6b7280;
+  margin-bottom:18px;
+}
+
+/* ===== SUB MENU ===== */
+.subnav{
+  display:flex;
+  align-items:center;
+  gap:22px;
+  border-bottom:1px solid #e5e7eb;
+  margin-bottom:22px;
+  padding-bottom:10px;
+}
+
+.subnav a{
+  text-decoration:none;
+  font-weight:600;
+  font-size:14px;
+  color:#6b7280;
+  padding-bottom:8px;
+}
+
+.subnav a.active{
+  color:#2563eb;
+  border-bottom:3px solid #2563eb;
+}
+
+.generate-btn{
+  margin-left:auto;
+  background:#2563eb;
+  color:#fff;
+  padding:10px 16px;
+  border-radius:10px;
+  font-weight:600;
+  font-size:14px;
+  text-decoration:none;
+}
+
+/* ===== SEARCH ===== */
+.search-wrap{
+  display:flex;
+  gap:12px;
+  background:#ffffff;
+  padding:14px;
+  border-radius:14px;
+  box-shadow:0 8px 24px rgba(0,0,0,0.06);
+  margin:20px 0;
+}
+
+.search-input{
+  flex:1;
+  padding:14px 16px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  font-size:14px;
+}
+
+.search-input:focus{
+  outline:none;
+  border-color:#2563eb;
+  box-shadow:0 0 0 3px rgba(37,99,235,0.15);
+}
+.search-row{
+  display:flex;
+  gap:12px;
+  margin:15px 0 25px;
+}
+
+.search-row input{
+  flex:1;
+  padding:12px;
+  border-radius:10px;
+  border:1px solid #d1d5db;
+  font-size:14px;
+}
+
+.search-row button{
+  padding:12px 18px;
+}
+.date-input{
+  background:#f9fafb;
+  cursor:pointer;
+}
+.date-input{
+  padding:14px 16px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  font-size:14px;
+}
+
+.search-btn{
+  padding:14px 20px;
+}
+/* ===== TABLE ===== */
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+th{
+  text-align:left;
+  font-size:13px;
+  color:#2563eb;
+  padding-bottom:10px;
+  border-bottom:1px solid #e5e7eb;
+}
+
+td{
+  padding:14px 6px;
+  border-bottom:1px solid #f1f5f9;
+  font-size:14px;
+}
+
+td strong{
+  font-weight:600;
+  color:#111827;
+}
+
+.amount{
+  font-weight:600;
+  color:#111827;
+}
+
+.issued{
+  color:#6b7280;
+  font-size:13px;
+}
+
+.actions a{
+  margin-right:10px;
+  font-size:13px;
+  font-weight:600;
+  color:#2563eb;
+  text-decoration:none;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <div class="header">
+  <div>
+    <h1>Receipts</h1>
+    <p style="margin:4px 0 0;color:#6b7280;font-size:14px;">
+      Manage, search and download all generated receipts
+    </p>
+  </div>
+
+  <a href="{{ url_for('home') }}" class="btn back-btn">← Back to Dashboard</a>
+</div>
+
+
+  <!-- SUB MENU -->
+  <div class="subnav">
+    <a href="{{ url_for('receipt_history') }}" class="active">All Receipts</a>
+    <a href="{{ url_for('generate_receipt') }}" class="tab">Generate Receipt</a>
+
+    
+  </div>
+
+  <!-- SEARCH -->
+  <form method="get" class="search-row">
+  <input
+    name="q"
+    value="{{ q }}"
+    placeholder="Search receipt #, client or BL number"
+  >
+
+  <input
+    type="date"
+    name="date"
+    value="{{ request.args.get('date','') }}"
+  >
+
+  <button class="btn">Search</button>
+</form>
+
+  <!-- TABLE -->
+  <table>
+    <tr>
+      <th>Receipt #</th>
+      <th>Client</th>
+      <th>Date</th>
+      <th>Amount</th>
+      <th>Issued By</th>
+      <th>Actions</th>
+    </tr>
+
+    {% for r in receipts %}
+    <tr>
+  <td><strong>{{ "%06d"|format(r.id) }}</strong></td>
+  <td>{{ r.client.name }}</td>
+  <td>{{ r.created_at.strftime("%d %b %Y") }}</td>
+  <td class="amount">₵{{ "%.2f"|format(r.amount) }}</td>
+
+  <td class="issued">
+    {% if r.description and 'Issued by:' in r.description %}
+      {{ r.description.split('Issued by:')[-1].strip() }}
+    {% else %}
+      —
+    {% endif %}
+  </td>
+
+  <td class="actions">
+    <a href="{{ url_for('receipt_preview', receipt_id=r.id) }}">Preview</a>
+    <a href="{{ url_for('download_receipt_pdf', receipt_id=r.id) }}">PDF</a>
+  </td>
+</tr>
+    {% endfor %}
+  </table>
+
+</div>
+</body>
+</html>
+"""
 RECEIPT_PREVIEW_HTML = """
 <!doctype html>
 <html>
 <head>
+<meta charset="utf-8">
 <title>Receipt Preview</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
 <style>
-  body{ background:#f3f4f6; font-family: 'Poppins', sans-serif; }
-  .wrap{ max-width:900px; margin:30px auto; text-align:left; }
-  .preview{
-    position:relative;
-    background: url('{{ url_for('static', filename='letterhead_receipt.png') }}') no-repeat;
-    background-size: 100% auto;
-    width: 100%;
-    height: 1120px;
-    border-radius: 6px;
-    overflow: hidden;
-  }
-
-  .content {
-    position: absolute;
-    left: 90px;
-    top: 400px;
-    right: 90px;
-    color: #111;
-    font-size: 18px;
-    line-height: 2.8;
-  }
-
-  .rno { position:absolute; left: 90px; top: 300px; font-weight:700; font-size:18px; }
-  .rdate{ position:absolute; left: 650px; top: 300px; font-weight:600; font-size:18px; }
-
-  .line { margin-bottom:10px; }
-
-  /* stamp and signature group (mid-right area) */
-  .stamp-group {
-    position:absolute;
-    right:90px;    /* move left-right */
-    top: 670px;     /* move up-down to position group relative to page */
-    width:160px;
-    text-align:center;
-  }
-  .stamp-group .stamp img { height:110px; width:auto; display:block; margin:0 auto; }
-
-  /* signature (above the stamp) */
-  .stamp-group .signature {
-  position: absolute;
-  top: 70px;       /* ⬅ move UP / DOWN */
-  left: 50%;
-  transform: translateX(-50%);
+body{
+  font-family:'Poppins',sans-serif;
+  background:#f3f4f6;
+  margin:0;
 }
 
-.stamp-group .signature img {
-  height:50px;     /* ⬅ signature size */
-  width:auto;
+.wrap{
+  max-width:900px;
+  margin:30px auto;
 }
 
-  /* line under signature/stamp with manager name */
-  .sig-line {
-    height:1px;
-    background:#222;
-    margin:6px auto 4px;
-    width:140px;
-    opacity:0.9;
-  }
-  .manager {
-    font-size:13px;
-    font-weight:700;
-    color:#222;
-  }
+.preview{
+  position:relative;
+  background:url('{{ url_for('static', filename='new_receipt.png') }}') no-repeat;
+  background-size:100% auto;
+  height:1120px;
+  border-radius:6px;
+  overflow:hidden;
+}
 
-  .btns { margin-top:14px; display:flex; gap:10px; }
-  a.btn{ padding:10px 14px; background:#2563eb; color:white; border-radius:8px; text-decoration:none; font-weight:600; }
+.rno{ position:absolute; left:90px; top:260px; font-weight:600; }
+.rdate{ position:absolute; right:90px; top:260px; }
+
+.section{
+  position:absolute;
+  font-size:13px;
+}
+
+.table{
+  position:absolute;
+  left:90px;
+  right:90px;
+  top:420px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+th, td{
+  padding:8px;
+  border-bottom:1px solid #ddd;
+}
+
+.footer{
+  position:absolute;
+  left:90px;
+  right:90px;
+  bottom:120px;
+  font-size:11px;
+  color:#444;
+}
 </style>
 </head>
+
 <body>
 <div class="wrap">
-  <h2>Receipt Preview</h2>
+<div class="preview">
 
-  <div class="preview">
-    <div class="rno">Receipt No: {{ "%06d"|format(receipt.id) }}</div>
-    <div class="rdate">Date: {{ today }}</div>
+<div class="rno">Receipt #: {{ "%06d"|format(receipt.id) }}</div>
+<div class="rdate">{{ today }}</div>
 
-    <div class="content">
-      <div class="line"><strong>Client:</strong> {{ client.name }}</div>
-      <div class="line"><strong>Amount:</strong> GHS {{ "%.2f"|format(receipt.amount) }}</div>
-      <div class="line"><strong>Method:</strong> {{ receipt.method or '-' }}</div>
-      <div class="line"><strong>Reference:</strong> {{ receipt.reference or '-' }}</div>
-      <div class="line"><strong>Description:</strong> {{ receipt.description or '-' }}</div>
-    </div>
+<div class="section" style="left:90px; top:300px;">
+  <strong>Received From</strong><br>
+  {{ client.name }}<br>
+  {% if client.phone %}Phone: {{ client.phone }}<br>{% endif %}
+  {% if client.email %}Email: {{ client.email }}{% endif %}
+</div>
 
-    <!-- stamp + signature group: signature above, stamp, line and manager name -->
-    <div class="stamp-group">
-      <!-- optional signature image (place a transparent PNG at static/signature.png) -->
-      <div class="signature">
-        <img src="{{ url_for('static', filename='signature.png') }}" alt="Signature">
+<div class="section" style="right:90px; top:300px; text-align:right;">
+  <strong>Receipt Summary</strong><br>
+  Total Paid: ₵{{ "%.2f"|format(receipt.amount) }}<br>
+  Currency: GHS<br>
+  Payment Type: {{ receipt.method or '-' }}
+</div>
+
+<div class="table">
+<table>
+<tr>
+  <th>#</th>
+  <th>BL Number</th>
+  <th>Description</th>
+  <th>Amount</th>
+</tr>
+
+{% for rbl, bl in bl_rows %}
+<tr>
+  <td>{{ loop.index }}</td>
+  <td>{{ bl.bl_number }}</td>
+  <td>{{ receipt.description }}</td>
+  <td>₵{{ "%.2f"|format(rbl.amount_applied) }}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+
+<div class="footer">
+  Generated by:
+  {% if receipt.description and 'Issued by:' in receipt.description %}
+    {{ receipt.description.split('Issued by:')[1].strip() }}
+  {% else %}
+    —
+  {% endif %}
+  | CargoBloc System | {{ today }}
+</div>
+
+</div>
+
+<div style="margin-top:20px; display:flex; gap:12px;">
+  <a href="{{ url_for('download_receipt_pdf', receipt_id=receipt.id) }}" class="btn">⬇ PDF</a>
+  <a href="{{ url_for('receipt_history') }}" class="btn">← Back</a>
+</div>
+
+</div>
+</body>
+</html>
+"""
+RECEIPTS_HOME_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Receipts</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+}
+
+.container{
+  max-width:900px;
+  margin:60px auto;
+  background:rgba(255,255,255,0.96);
+  border-radius:18px;
+  padding:40px;
+  text-align:center;
+}
+
+h1{ color:#2563eb; margin-bottom:30px; }
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:30px;
+}
+
+.card{
+  background:#fff;
+  padding:30px;
+  border-radius:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.08);
+  cursor:pointer;
+  transition:.2s;
+}
+
+.card:hover{
+  transform:translateY(-3px);
+}
+
+.card h3{
+  color:#2563eb;
+  margin-bottom:10px;
+}
+
+.card p{
+  font-size:14px;
+  color:#374151;
+}
+
+a{ text-decoration:none; color:inherit; }
+</style>
+</head>
+
+<body>
+<div class="container">
+  <h1>Receipts</h1>
+
+  <div class="grid">
+
+    <a href="{{ url_for('generate_receipt') }}">
+      <div class="card">
+        <h3>➕ Generate Receipt</h3>
+        <p>Create a new receipt for a client</p>
       </div>
+    </a>
 
-      <div class="stamp">
-        <img src="{{ url_for('static', filename='stamp.png') }}" alt="Stamp">
+    <a href="{{ url_for('receipt_history') }}">
+      <div class="card">
+        <h3>📂 All Receipts</h3>
+        <p>Search, preview and download past receipts</p>
       </div>
+    </a>
 
-      <div class="sig-line"></div>
-      <div class="manager">Romeo Frimpong — Manager</div>
-    </div>
-  </div>
-
-  <div class="btns">
-    <a class="btn" href="{{ url_for('download_receipt_pdf', receipt_id=receipt.id) }}">Download PDF</a>
-    <a class="btn" href="{{ url_for('generate_receipt') }}">New Receipt</a>
   </div>
 </div>
 </body>
-</html>  """
-
+</html>
+"""
 # -----------------------
 # RUN APP
 # -----------------------
+
+@app.after_request
+def security_headers(response):
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'"
+    )
+    return response
+
 if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     with app.app_context():
         db.create_all()
     print("✅ Default login → admin / Cargo@conso123")
-    app.run(debug=True)
+    app.run(debug=False)

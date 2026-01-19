@@ -1,0 +1,35 @@
+2026-01-19 02:47:19,534 WARNING  * Debugger is active!
+2026-01-19 02:47:19,552 INFO  * Debugger PIN: 464-552-753
+2026-01-19 02:47:20,752 INFO 127.0.0.1 - - [19/Jan/2026 02:47:20] "GET /generate_receipt HTTP/1.1" 200 -
+2026-01-19 02:47:21,548 INFO 127.0.0.1 - - [19/Jan/2026 02:47:21] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 02:50:16,161 INFO  * Detected change in 'C:\\Users\\DELL\\Desktop\\client_manager\\app.py', reloading
+2026-01-19 03:08:26,637 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 03:08:26,637 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 03:09:07,089 INFO 127.0.0.1 - - [19/Jan/2026 03:09:07] "GET /generate_receipt HTTP/1.1" 200 -
+2026-01-19 03:09:07,443 INFO 127.0.0.1 - - [19/Jan/2026 03:09:07] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 03:09:11,099 INFO 127.0.0.1 - - [19/Jan/2026 03:09:11] "GET /generate_receipt HTTP/1.1" 200 -
+2026-01-19 03:09:11,173 INFO 127.0.0.1 - - [19/Jan/2026 03:09:11] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 03:15:17,534 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 03:15:17,534 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 09:21:01,688 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 09:21:01,688 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 09:21:18,236 INFO 127.0.0.1 - - [19/Jan/2026 09:21:18] "GET /generate_receipt HTTP/1.1" 200 -
+2026-01-19 09:21:18,336 INFO 127.0.0.1 - - [19/Jan/2026 09:21:18] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:21,337 INFO 127.0.0.1 - - [19/Jan/2026 09:21:21] "GET /receipts HTTP/1.1" 200 -
+2026-01-19 09:21:21,387 INFO 127.0.0.1 - - [19/Jan/2026 09:21:21] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:22,803 INFO 127.0.0.1 - - [19/Jan/2026 09:21:22] "GET / HTTP/1.1" 200 -
+2026-01-19 09:21:22,855 INFO 127.0.0.1 - - [19/Jan/2026 09:21:22] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:22,861 INFO 127.0.0.1 - - [19/Jan/2026 09:21:22] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:29,443 INFO 127.0.0.1 - - [19/Jan/2026 09:21:29] "[32mGET /logout HTTP/1.1[0m" 302 -
+2026-01-19 09:21:29,456 INFO 127.0.0.1 - - [19/Jan/2026 09:21:29] "GET /login HTTP/1.1" 200 -
+2026-01-19 09:21:29,503 INFO 127.0.0.1 - - [19/Jan/2026 09:21:29] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:32,742 INFO 127.0.0.1 - - [19/Jan/2026 09:21:32] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-01-19 09:21:32,770 INFO 127.0.0.1 - - [19/Jan/2026 09:21:32] "GET / HTTP/1.1" 200 -
+2026-01-19 09:21:32,847 INFO 127.0.0.1 - - [19/Jan/2026 09:21:32] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 09:21:32,849 INFO 127.0.0.1 - - [19/Jan/2026 09:21:32] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 10:48:57,130 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 10:48:57,130 INFO [33mPress CTRL+C to quit[0m
