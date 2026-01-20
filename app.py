@@ -2161,6 +2161,28 @@ CLIENTS_PAGE_HTML = """<!doctype html>
     border-radius:8px; text-decoration:none; font-weight:600;
   }
   a.back{color:#2563eb;text-decoration:none;font-weight:600;}
+
+  /* ===== CLIENTS LIST SCROLL (CargoBloc glass look) ===== */
+.clients-scroll {
+  max-height: 420px;            /* adjust up/down to taste */
+  overflow-y: auto;
+  padding-right: 8px;           /* room for scrollbar */
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+}
+
+/* subtle CargoBloc glass scrollbar */
+.clients-scroll::-webkit-scrollbar { width: 8px; }
+.clients-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(37,99,235,0.25), rgba(0,174,239,0.25));
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+}
+.clients-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* optional: keep each client item full width inside the scroller */
+.clients-scroll .client-item { width:100%; box-sizing:border-box; }
+
 </style>
 </head>
 <body>
@@ -2196,7 +2218,7 @@ CLIENTS_PAGE_HTML = """<!doctype html>
   {% endif %}
 
 </form>
-
+    <div class="client-scroll"
     <div class="list">
       {% for row in clients %}
       {% set c = row.client %}
@@ -2223,6 +2245,7 @@ CLIENTS_PAGE_HTML = """<!doctype html>
   </div>
 </body>
 </html>"""
+
 HOUSE_BL_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -3468,7 +3491,21 @@ a{ text-decoration:none; color:inherit; }
 
 <body>
 <div class="container">
+  <div class="header" style="display:flex; justify-content:space-between; align-items:center;">
   <h1>Receipts</h1>
+
+  <a href="{{ url_for('home') }}"
+     class="btn"
+     style="
+       background:rgba(255,255,255,0.75);
+       color:#2563eb;
+       border:1px solid rgba(37,99,235,0.25);
+       backdrop-filter:blur(8px);
+       font-weight:600;
+     ">
+    ← Back to Dashboard
+  </a>
+</div>
 
   <div class="grid">
 
