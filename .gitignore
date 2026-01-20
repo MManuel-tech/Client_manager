@@ -5,4 +5,6 @@ instance/
 .env
 uploads/
 *.sqlite3
-*.db
+*.dbclients.db 
+backups/ 
+error.log 
