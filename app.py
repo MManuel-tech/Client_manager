@@ -13,6 +13,7 @@ from flask import (
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from werkzeug.utils import secure_filename
+from flask import flash 
 
 # ReportLab / PDF helpers (used later)
 from reportlab.lib.pagesizes import A4
@@ -167,8 +168,22 @@ def add_activity(action, reference=None, user=None):
         db.session.commit()
     except Exception as e:
         print("⚠ Activity log error:", e)
-        db.session.rollback()    
+        db.session.rollback() 
+#------------------------        
+#  BL HELPER
+#------------------------
+def bl_exists_for_client(client_id, bl_number):
+    return (
+        BL.query
+        .filter(
+            BL.client_id == client_id,
+            db.func.lower(BL.bl_number) == bl_number.lower()
+        )
+        .first()
+        is not None
+    )
 
+         
 # -----------------------
 # LOGIN MANAGEMENT
 # -----------------------
@@ -393,17 +408,31 @@ def client_detail(client_id):
     else:
         finance_status = "Owing"
 
+    # ================= POST ACTIONS =================
     if request.method == 'POST':
         action = request.form.get('action')
 
-        # ===== ADD SINGLE BL (NO PAID FIELD) =====
+        # ===== ADD SINGLE BL =====
         if action == 'add_bl':
             bl_number = request.form.get('bl_number', '').strip()
+
+            if not bl_number:
+                flash("BL number is required.", "warning")
+                return redirect(url_for('client_detail', client_id=client.id))
+
+            if bl_exists_for_client(client.id, bl_number):
+                flash(f"⚠ BL '{bl_number}' has already been booked for this client.", "warning")
+                return redirect(url_for('client_detail', client_id=client.id))
 
             try:
                 total = float(request.form.get('amount_total') or 0)
             except:
                 total = 0.0
+
+            try:
+                paid = float(request.form.get('amount_paid') or 0)
+            except:
+                paid = 0.0
 
             file = request.files.get('bl_document')
             filename = None
@@ -415,21 +444,31 @@ def client_detail(client_id):
             db.session.add(BL(
                 bl_number=bl_number,
                 amount_total=total,
-                amount_paid=0,
+                amount_paid=paid,
                 document=filename,
                 client=client
             ))
             db.session.commit()
+
+            flash("BL added successfully.", "success")
             return redirect(url_for('client_detail', client_id=client.id))
 
-        # ===== ADD MULTIPLE BLs (NO PAID FIELD) =====
+        # ===== ADD MULTIPLE BLs =====
         elif action == 'add_multi_bl':
             bl_numbers = request.form.getlist('bl_number[]')
             totals = request.form.getlist('amount_total[]')
+            paids = request.form.getlist('amount_paid[]')
+
+            skipped = []
+            added = 0
 
             for i in range(len(bl_numbers)):
                 bl_number = bl_numbers[i].strip()
                 if not bl_number:
+                    continue
+
+                if bl_exists_for_client(client.id, bl_number):
+                    skipped.append(bl_number)
                     continue
 
                 try:
@@ -437,14 +476,30 @@ def client_detail(client_id):
                 except:
                     total = 0.0
 
+                try:
+                    paid = float(paids[i]) if paids[i] else 0.0
+                except:
+                    paid = 0.0
+
                 db.session.add(BL(
                     bl_number=bl_number,
                     amount_total=total,
-                    amount_paid=0,
+                    amount_paid=paid,
                     client=client
                 ))
+                added += 1
 
             db.session.commit()
+
+            if added:
+                flash(f"{added} BL(s) added successfully.", "success")
+
+            if skipped:
+                flash(
+                    "⚠ These BLs were skipped (already exist): " + ", ".join(skipped),
+                    "warning"
+                )
+
             return redirect(url_for('client_detail', client_id=client.id))
 
         # ===== UPLOAD CLIENT DOCUMENT =====
@@ -454,6 +509,7 @@ def client_detail(client_id):
                 filename = secure_filename(file.filename)
                 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+
                 desc = request.form.get('doc_desc', '')
                 db.session.add(ClientDocument(
                     filename=filename,
@@ -461,6 +517,7 @@ def client_detail(client_id):
                     client=client
                 ))
                 db.session.commit()
+
             return redirect(url_for('client_detail', client_id=client.id))
 
         # ===== EXPORT SELECTED BLs =====
@@ -509,6 +566,7 @@ def client_detail(client_id):
             db.session.commit()
             return redirect(url_for('client_detail', client_id=client.id))
 
+    # ================= GET RENDER =================
     return render_template_string(
         CLIENT_HTML,
         client=client,
@@ -517,7 +575,7 @@ def client_detail(client_id):
         total_paid=total_paid,
         total_unpaid=total_unpaid,
         finance_status=finance_status
-    )
+    )   
 
 @app.route('/client/<int:client_id>/delete')
 @login_required
@@ -1851,6 +1909,29 @@ CLIENT_HTML = """<!doctype html>
     <h1>Client Overview</h1>
 
     <p class="meta">{{ client.name }} • {{ client.email or '-' }} • {{ client.phone or '-' }}</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+       {% for category, msg in messages %}
+          <div style="
+            margin:10px 0;
+            padding:10px 14px;
+            border-radius:10px;
+            font-size:14px;
+            background:
+              {% if category == 'success' %}rgba(22,163,74,0.15)
+              {% else %}rgba(220,38,38,0.15){% endif %};
+            color:
+              {% if category == 'success' %}#166534
+              {% else %}#991b1b{% endif %};
+            border-left:4px solid
+              {% if category == 'success' %}#16a34a
+              {% else %}#dc2626{% endif %};
+          ">
+            {{ msg }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
 
     <!-- SUMMARY -->
     <div class="summary-card">
