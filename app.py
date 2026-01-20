@@ -2,7 +2,7 @@
 import os
 import shutil
 import io
-from datetime import datetime
+from datetime import datetime, date 
 from textwrap import wrap
 from io import BytesIO
 
@@ -141,6 +141,33 @@ class ReceiptBL(db.Model):
     amount_applied = db.Column(db.Float, default=0)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+# -----------------------
+# ACTIVITY LOG MODEL
+# -----------------------
+class Activity(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    action = db.Column(db.String(150), nullable=False)
+    reference = db.Column(db.String(250))
+    user = db.Column(db.String(120))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# -----------------------
+# ACTIVITY LOGGER (SAFE)
+# -----------------------
+def add_activity(action, reference=None, user=None):
+    try:
+        db.session.add(
+            Activity(
+                action=action,
+                reference=reference,
+                user=user
+            )
+        )
+        db.session.commit()
+    except Exception as e:
+        print("⚠ Activity log error:", e)
+        db.session.rollback()    
 
 # -----------------------
 # LOGIN MANAGEMENT
@@ -221,11 +248,95 @@ def home():
         except ValueError:
             pass
 
-    clients = query.order_by(Client.name).all()
+    clients = query.all()
 
-    total_billed = sum(sum((bl.amount_total or 0) for bl in c.bls) for c in clients)
-    total_paid = sum(sum((bl.amount_paid or 0) for bl in c.bls) for c in clients)
-    total_unpaid = total_billed - total_paid
+    # =========================
+    # DASHBOARD METRICS
+    # =========================
+    total_billed = 0.0
+    total_paid = 0.0
+    total_unpaid = 0.0
+
+    cleared = part_paid = owing = 0
+    overdue_30 = overdue_60 = overdue_90 = 0
+
+    today = date.today()
+    receipts_today = receipts_7 = receipts_30 = 0
+
+    activities = []
+
+    # small helper to normalize created_at -> date object or None
+    def to_date_obj(dt):
+        if dt is None:
+            return None
+        if isinstance(dt, datetime):
+            return dt.date()
+        # assume already a date-like object
+        return dt
+
+    for c in clients:
+        for bl in getattr(c, "bls", []) or []:
+            amt_total = float(bl.amount_total or 0)
+            amt_paid = float(bl.amount_paid or 0)
+            total_billed += amt_total
+            total_paid += amt_paid
+            unpaid = max(amt_total - amt_paid, 0.0)
+            total_unpaid += unpaid
+
+            # STATUS DISTRIBUTION
+            if unpaid <= 0:
+                cleared += 1
+            elif amt_paid > 0:
+                part_paid += 1
+            else:
+                owing += 1
+
+            # OVERDUE RISK (if BL has created_at)
+            created_dt = getattr(bl, "created_at", None)
+            created_date = to_date_obj(created_dt)
+            if created_date and unpaid > 0:
+                age = (today - created_date).days
+                if age >= 90:
+                    overdue_90 += 1
+                elif age >= 60:
+                    overdue_60 += 1
+                elif age >= 30:
+                    overdue_30 += 1
+
+            # ACTIVITY (keep original datetime if present)
+            if created_dt:
+                activities.append({
+                    "text": f"BL added: {getattr(bl, 'bl_number', '')} ({getattr(c, 'name', 'Client')})",
+                    "time": created_dt
+                })
+
+        # receipts for this client
+        for r in getattr(c, "receipts", []) or []:
+            created_dt = getattr(r, "created_at", None)
+            created_date = to_date_obj(created_dt)
+            if created_dt:
+                activities.append({
+                    "text": f"Receipt generated for {getattr(c, 'name', 'Client')} (₵{(r.amount or 0):,.2f})",
+                    "time": created_dt
+                })
+            if created_date:
+                delta = (today - created_date).days
+                if delta == 0:
+                    receipts_today += 1
+                if delta <= 7:
+                    receipts_7 += 1
+                if delta <= 30:
+                    receipts_30 += 1
+
+    # House BL activity (recent)
+    for h in HouseBL.query.order_by(HouseBL.created_at.desc()).limit(10).all():
+        activities.append({
+            "text": f"House BL created: {getattr(h, 'bl_number', '')}",
+            "time": getattr(h, "created_at", None)
+        })
+
+    # sort activities newest first; missing times are treated as very old
+    activities.sort(key=lambda x: x.get("time") or datetime.min, reverse=True)
 
     return render_template_string(
         HOME_HTML,
@@ -233,6 +344,20 @@ def home():
         total_billed=total_billed,
         total_paid=total_paid,
         total_unpaid=total_unpaid,
+
+        cleared=cleared,
+        part_paid=part_paid,
+        owing=owing,
+
+        overdue_30=overdue_30,
+        overdue_60=overdue_60,
+        overdue_90=overdue_90,
+
+        receipts_today=receipts_today,
+        receipts_7=receipts_7,
+        receipts_30=receipts_30,
+
+        activities=activities[:10],
         q=q,
         selected_date=date_str
     )
@@ -254,7 +379,7 @@ def client_detail(client_id):
     client = Client.query.get_or_404(client_id)
     info = None
 
-    # ===== FINANCE SUMMARY (ALWAYS RUNS) =====
+    # ===== FINANCE SUMMARY =====
     total_billed = sum((bl.amount_total or 0) for bl in client.bls)
     total_paid = sum((bl.amount_paid or 0) for bl in client.bls)
     total_unpaid = total_billed - total_paid
@@ -267,12 +392,11 @@ def client_detail(client_id):
         finance_status = "Part Paid"
     else:
         finance_status = "Owing"
-    # app.py (PART 2)
-    # (continued) handle client POST actions
+
     if request.method == 'POST':
         action = request.form.get('action')
 
-        # ===== ADD SINGLE BL =====
+        # ===== ADD SINGLE BL (NO PAID FIELD) =====
         if action == 'add_bl':
             bl_number = request.form.get('bl_number', '').strip()
 
@@ -280,11 +404,6 @@ def client_detail(client_id):
                 total = float(request.form.get('amount_total') or 0)
             except:
                 total = 0.0
-
-            try:
-                paid = float(request.form.get('amount_paid') or 0)
-            except:
-                paid = 0.0
 
             file = request.files.get('bl_document')
             filename = None
@@ -296,34 +415,17 @@ def client_detail(client_id):
             db.session.add(BL(
                 bl_number=bl_number,
                 amount_total=total,
-                amount_paid=paid,
+                amount_paid=0,
                 document=filename,
                 client=client
             ))
             db.session.commit()
             return redirect(url_for('client_detail', client_id=client.id))
 
-        # ===== RECORD PAYMENT =====
-        elif action == 'record_payment':
-            try:
-                bl_id = int(request.form.get('bl_id'))
-                extra_payment = float(request.form.get('extra_payment') or 0)
-            except:
-                bl_id = None
-                extra_payment = 0
-
-            bl = BL.query.get(bl_id) if bl_id else None
-            if bl:
-                bl.amount_paid = (bl.amount_paid or 0) + extra_payment
-                db.session.commit()
-
-            return redirect(url_for('client_detail', client_id=client.id))
-
-        # ===== ADD MULTIPLE BLs AT ONCE =====
+        # ===== ADD MULTIPLE BLs (NO PAID FIELD) =====
         elif action == 'add_multi_bl':
             bl_numbers = request.form.getlist('bl_number[]')
             totals = request.form.getlist('amount_total[]')
-            paids = request.form.getlist('amount_paid[]')
 
             for i in range(len(bl_numbers)):
                 bl_number = bl_numbers[i].strip()
@@ -335,15 +437,10 @@ def client_detail(client_id):
                 except:
                     total = 0.0
 
-                try:
-                    paid = float(paids[i]) if paids[i] else 0.0
-                except:
-                    paid = 0.0
-
                 db.session.add(BL(
                     bl_number=bl_number,
                     amount_total=total,
-                    amount_paid=paid,
+                    amount_paid=0,
                     client=client
                 ))
 
@@ -358,9 +455,12 @@ def client_detail(client_id):
                 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 desc = request.form.get('doc_desc', '')
-                db.session.add(ClientDocument(filename=filename, description=desc, client=client))
+                db.session.add(ClientDocument(
+                    filename=filename,
+                    description=desc,
+                    client=client
+                ))
                 db.session.commit()
-
             return redirect(url_for('client_detail', client_id=client.id))
 
         # ===== EXPORT SELECTED BLs =====
@@ -703,11 +803,14 @@ def generate_receipt():
         total_amount = float(request.form.get('amount') or 0)
         issued_by = request.form.get('issued_by')
 
+        payment_type = request.form.get('payment_type')
+        transaction_id = request.form.get('transaction_id')
+
         receipt = Receipt(
             client_id=client_id,
             amount=total_amount,
-            method="AUTO",
-            reference=None,
+            method=payment_type,
+            reference=transaction_id if payment_type != 'Cash' else None,
             description=f"{final_description} | Issued by: {issued_by}"
         )
         db.session.add(receipt)
@@ -760,7 +863,6 @@ def generate_receipt():
         receipt=receipt,
         selected_client_id=client_id
     )
-
 @app.route('/receipts')
 @login_required
 def receipt_history():
@@ -829,6 +931,31 @@ def receipt_preview(receipt_id):
         bl_rows=bl_rows,
         today=receipt.created_at.strftime("%d %b %Y")
     )
+@app.route('/export/dashboard.csv')
+@login_required
+def export_dashboard_csv():
+    import csv
+    from io import StringIO
+
+    output = StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([
+        "Client",
+        "Total Billed",
+        "Total Paid",
+        "Outstanding"
+    ])
+
+    for c in Client.query.all():
+        billed = sum(bl.amount_total or 0 for bl in c.bls)
+        paid = sum(bl.amount_paid or 0 for bl in c.bls)
+        writer.writerow([c.name, billed, paid, billed - paid])
+
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = "attachment; filename=dashboard.csv"
+    response.headers["Content-Type"] = "text/csv"
+    return response
 
 @app.route('/receipts_home')
 @login_required
@@ -867,9 +994,9 @@ def download_receipt_pdf(receipt_id):
     c.setFont("Helvetica-Bold", 11)
 
     header_y = height - 205
-    c.drawString(80, header_y, f"Receipt No: CBL-{receipt.id:06d}")
+    c.drawString(60, header_y, f"Receipt No: CBL-{receipt.id:06d}")
     c.drawRightString(
-        width - 80,
+        width - 60,
         header_y,
         receipt.created_at.strftime("%d %b %Y")
     )
@@ -922,11 +1049,11 @@ def download_receipt_pdf(receipt_id):
     c.setFillColor(colors.black)
 
     c.setFont("Helvetica", 10)
-    c.drawString(right_x + 10, box_y + box_h - 45, "Total Paid:")
+    c.drawString(right_x + 10, box_y + box_h - 45, "Transaction ID:")
     c.drawRightString(
         right_x + box_w - 10,
         box_y + box_h - 45,
-        f"GHS {receipt.amount:,.2f}"
+        receipt.reference or "CASH PAYMENT"
     )
 
     c.drawString(right_x + 10, box_y + box_h - 65, "Currency:")
@@ -1377,6 +1504,7 @@ LOGIN_HTML = """<!doctype html>
 <footer>© 2025 CargoBloc Logistics</footer>
 </body>
 </html>"""
+
 HOME_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -1384,361 +1512,271 @@ HOME_HTML = """<!doctype html>
 <title>CARGOBLOC — Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --deep-blue: #2563eb;
-    --light-blue: #cfeaff;
-    --accent: #00AEEF;
-    --text: #0b1220;
-  }
-  html,body{height:100%; margin:0; font-family:'Poppins',sans-serif; color:var(--text);}
-
-  /* page background (wide port image) */
-  body{
-    background: url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
-    background-size: cover;
-    -webkit-font-smoothing:antialiased;
-    -moz-osx-font-smoothing:grayscale;
-  }
-
-  /* centered overlay container */
-  .page-wrap{
-    max-width:1200px;
-    margin:36px auto;
-    display:grid;
-    grid-template-columns: 220px 1fr;
-    gap:20px;
-    align-items:start;
-    padding:18px;
-  }
-
-  /* SIDEBAR */
-  .sidebar{
-    background: var(--light-blue);
-    border-radius:12px;
-    padding:18px;
-    box-shadow:0 10px 30px rgba(13,27,56,0.08);
-    height: calc(100vh - 100px);
-    box-sizing:border-box;
-    display:flex;
-    flex-direction:column;
-    gap:18px;
-  }
-  .brand{
-    display:flex; align-items:center; gap:12px;
-  }
-  .brand img{ height:44px; width:auto; border-radius:6px; }
-  .brand h3{ margin:0; font-size:16px; font-weight:700; color:var(--text); }
-  .nav{ margin-top:6px; display:flex; flex-direction:column; gap:8px; }
-  .nav a{
-    display:block; padding:10px 12px; border-radius:8px; color:var(--text); text-decoration:none; font-weight:600;
-  }
-  .nav a.active{ background: rgba(255,255,255,0.25); }
-
-  .sidebar .small{ font-size:13px; color:rgba(11,17,32,0.7); margin-top:auto; }
-
-  /* MAIN PANEL */
-  .main{
-    background: rgba(255,255,255,0.92);
-    border-radius:12px;
-    padding:22px;
-    box-shadow:0 10px 30px rgba(3,7,18,0.08);
-    position:relative;
-    overflow:hidden;
-  }
-
-  /* watermark (centered) */
-  .watermark{
-    position:absolute;
-    left:50%;
-    top:42%;
-    transform:translate(-50%,-50%);
-    opacity:0.06;
-    pointer-events:none;
-    width:560px;
-    max-width:70%;
-    filter: blur(0.4px);
-  }
-
-  header.top{
-    display:flex;
-    gap:12px;
-    align-items:center;
-    margin-bottom:14px;
-  }
-  header.top h1{ font-size:18px; margin:0; font-weight:700; color:var(--deep-blue); }
-  .header-actions{ margin-left:auto; display:flex; gap:8px; align-items:center; }
-
-  /* cards row */
-  .cards{ display:flex; gap:12px; margin-bottom:18px; flex-wrap:wrap; }
-  .card{
-    background:#fff; border-radius:10px; padding:16px; min-width:180px;
-    box-shadow:0 6px 18px rgba(3,7,18,0.04); flex:1;
-  }
-  .card h4{ margin:0 0 8px 0; font-size:13px; color:rgba(11,17,32,0.7); }
-  .card .value{ font-size:20px; font-weight:700; color:var(--text); }
-
-  /* add-client panel */
-  .add-client{ background:#fff; border-radius:10px; padding:12px; margin-bottom:16px; box-shadow:0 6px 18px rgba(3,7,18,0.04); }
-  .add-client input, .add-client textarea{
-    width:100%; padding:10px; border-radius:8px; border:1px solid #e6eefb; margin:8px 0; box-sizing:border-box;
-  }
-
-  /* search & clients list */
-  .search-row{ display:flex; gap:8px; align-items:center; margin-bottom:12px; }
-  .search-row input{ padding:10px 12px; border-radius:8px; border:1px solid #e6eefb; width:320px; }
-  .client-list{ display:flex; flex-direction:column; gap:10px; max-height:360px; overflow:auto; padding-right:6px; }
-
-  .client-item{
-    display:flex; justify-content:space-between; align-items:center;
-    background:#fafafa; padding:12px; border-radius:8px; border:1px solid #eef6ff;
-  }
-  .client-item .meta{ font-weight:600; }
-  .client-item .meta small{ display:block; font-weight:400; color:#6b7280; margin-top:4px; font-size:13px; }
-
-  /* === CARGOBLOC GLASS BUTTONS — Refined Look === */
-button,
-.btn,
-.client-actions a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  border-radius: 12px;
-  border: 1.5px solid rgba(255,255,255,0.25);
-  background: rgba(255,255,255,0.15);
-  color: #0b1220;
-  backdrop-filter: blur(10px);
-  text-decoration: none;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.08);
-  cursor: pointer;
-  transition: all 0.25s ease;
+:root{
+  --deep-blue:#2563eb;
+  --accent:#00AEEF;
+  --green:#16a34a;
+  --red:#dc2626;
+  --text:#0b1220;
+}
+html,body{margin:0;height:100%;font-family:'Poppins',sans-serif;color:var(--text);}
+body{
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+}
+.page-wrap{
+  max-width:1200px;
+  margin:36px auto;
+  display:grid;
+  grid-template-columns:220px 1fr;
+  gap:20px;
+  padding:18px;
 }
 
-/* 🔵 Core Blue Buttons — Add Client, Open, Refresh */
-button[type="submit"],
-.client-actions .open,
-.add-client button {
-  color: #fff;
-  background: linear-gradient(135deg, rgba(37,99,235,0.85), rgba(0,174,239,0.85));
-  border: none;
-  box-shadow: 0 6px 18px rgba(37,99,235,0.25);
+/* SIDEBAR */
+.sidebar{
+  background:#cfeaff;
+  border-radius:12px;
+  padding:18px;
+  height:calc(100vh - 100px);
+  display:flex;
+  flex-direction:column;
+  gap:18px;
 }
-button[type="submit"]:hover,
-/* === Make Open and Delete buttons slightly smaller === */
-.client-actions .open,
-.client-actions .delete {
-  padding: 5px 10px;      /* smaller button size */
-  font-size: 12.5px;      /* reduce text size slightly */
-  border-radius: 8px;     /* slightly less rounded */
-  transform: scale(0.95); /* overall compact feel */
+.brand{display:flex;gap:12px;align-items:center;}
+.brand img{height:44px;border-radius:6px;}
+.brand h3{margin:0;font-size:16px;font-weight:700;}
+.nav a{
+  display:block;
+  padding:10px 12px;
+  border-radius:8px;
+  text-decoration:none;
+  font-weight:600;
+  color:var(--text);
+}
+.nav a.active{background:rgba(255,255,255,0.3);}
+.sidebar small{margin-top:auto;font-size:13px;}
+
+/* MAIN */
+.main{
+  background:rgba(255,255,255,0.92);
+  border-radius:12px;
+  padding:22px;
+  position:relative;
+}
+.watermark{
+  position:absolute;
+  left:50%;
+  top:42%;
+  transform:translate(-50%,-50%);
+  opacity:0.05;
+  width:520px;
+  pointer-events:none;
+}
+header.top h1{margin:0;color:var(--deep-blue);}
+
+/* CARDS */
+.cards{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
+.card{
+  background:#fff;
+  border-radius:12px;
+  padding:16px;
+  box-shadow:0 6px 18px rgba(0,0,0,0.05);
+  flex:1;
+}
+.card h4{margin:0 0 8px;font-size:13px;color:#6b7280;}
+.card .value{font-size:20px;font-weight:700;}
+
+/* ADD CLIENT */
+.add-client form{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.add-client input,
+.add-client textarea{
+  padding:10px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:rgba(255,255,255,0.85);
+}
+.add-client textarea{grid-column:1 / -1;}
+.add-client button{
+  grid-column:1 / -1;
+  padding:12px;
+  border:none;
+  border-radius:12px;
+  background:linear-gradient(135deg,var(--deep-blue),var(--accent));
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
 }
 
-.client-actions .open:hover,
-.client-actions .delete:hover {
-  transform: scale(0.98) translateY(-1px); /* smooth hover lift */
-}
-/* 🟦 Export / New Report / Secondary Buttons */
-.btn {
-  color: #00AEEF;
-  background: rgba(255,255,255,0.25);
-  border: 1.5px solid rgba(0,174,239,0.35);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 4px 12px rgba(0,174,239,0.25);
-}
-.btn:hover {
-  background: linear-gradient(135deg, rgba(0,174,239,0.15), rgba(37,99,235,0.15));
-  transform: translateY(-2px);
+/* BUTTONS */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  padding:10px 16px;
+  border-radius:12px;
+  font-weight:600;
+  text-decoration:none;
+  color:#fff;
+  background:linear-gradient(135deg,var(--deep-blue),var(--accent));
 }
 
-/* 🔴 Delete Button */
-.client-actions .delete {
-  background: rgba(220,38,38,0.2);
-  color: #b91c1c;
-  border: 1.5px solid rgba(220,38,38,0.3);
-  box-shadow: 0 4px 10px rgba(220,38,38,0.15);
+/* BADGES */
+.badge{
+  display:inline-block;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
 }
-.client-actions .delete:hover {
-  background: rgba(220,38,38,0.35);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(220,38,38,0.25);
-}
+.badge.green{background:#dcfce7;color:#166534;}
+.badge.red{background:#fee2e2;color:#991b1b;}
 
-/* 🔍 Search Fields with Glass Blur */
-.search-row input {
-  background: rgba(255,255,255,0.3);
-  border: 1px solid rgba(255,255,255,0.5);
-  backdrop-filter: blur(8px);
-  color: #0b1220;
-  border-radius: 10px;
-  padding: 10px 14px;
-  transition: all 0.25s ease;
-}
-.search-row input:focus {
-  outline: none;
-  border-color: #00AEEF;
-  box-shadow: 0 0 10px rgba(0,174,239,0.35);
-}
-  footer{ margin-top:18px; text-align:center; color:#6b7280; font-size:13px; }
+/* SMALL STATS ROW */
+.small-stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;}
+.small-stat{background:#fff;padding:10px;border-radius:10px;min-width:120px;box-shadow:0 4px 12px rgba(0,0,0,0.04);}
+.small-stat .n{font-weight:700;font-size:16px;}
+.small-stat .lbl{font-size:12px;color:#6b7280;}
 
-  /* small responsive tweak */
-  @media(max-width:980px){
-    .page-wrap{ grid-template-columns: 1fr; padding:14px; }
-    .sidebar{ height:auto; order:2; display:flex; flex-direction:row; gap:10px; padding:10px; align-items:center; }
-    .main{ order:1; margin-bottom:20px; }
-    .watermark{ width:380px; opacity:0.04; top:46%; }
-  }
+/* FOOTER */
+footer{text-align:center;color:#6b7280;font-size:13px;margin-top:18px;}
 </style>
 </head>
+
 <body>
-  <div class="page-wrap">
+<div class="page-wrap">
 
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <div class="brand">
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="logo">
-        <div>
-          <h3>CargoBloc</h3>
-          <div style="font-size:12px;color:rgba(11,17,32,0.75);">Logistics Suite</div>
-        </div>
-      </div>
-
-      <nav class="nav">
-        <a href="#" class="active">Dashboard</a>
-        <a href="{{ url_for('clients_page') }}">Clients</a>
-        <a href="{{ url_for('receipts_home') }}">Receipts</a>
-        <a href="{{ url_for('house_bl') }}">House BLs</a>
-        <a href="{{ url_for('logout') }}">Logout</a>
-      </nav>
-
-      <div class="small">Contact: +233 53 055 8275 • info@cargobloc.world</div>
-    </aside>
-
-    <!-- MAIN -->
-    <main class="main">
-      <!-- centered watermark using the same logo (transparent) -->
-      <img src="{{ url_for('static', filename='logo.png') }}" class="watermark" alt="watermark">
-
-      <header class="top">
-        <h1>Dashboard</h1>
-        <div class="header-actions">
-          
-        </div>
-      </header>
-
-      <section class="cards">
-        <div class="card">
-          <h4>Total Billed</h4>
-          <div class="value">₵{{ '%.2f'|format(total_billed) }}</div>
-        </div>
-        <div class="card">
-          <h4>Total Paid</h4>
-          <div class="value">₵{{ '%.2f'|format(total_paid) }}</div>
-        </div>
-        <div class="card">
-          <h4>Unpaid</h4>
-          <div class="value">₵{{ '%.2f'|format(total_unpaid) }}</div>
-        </div>
-      </section>
-
-      <section style="display:flex; gap:18px; flex-wrap:wrap;">
-
-  <!-- LEFT COLUMN -->
-  <div style="flex:0.45; min-width:320px;">
-
-    <div class="add-client">
-      <h4 style="margin:0 0 8px 0;">➕ Add New Client</h4>
-      <form method="post" action="{{ url_for('add_client') }}">
-        <input name="name" placeholder="Client Name" required>
-        <input name="email" placeholder="Email">
-        <input name="phone" placeholder="Phone">
-        <textarea name="notes" placeholder="Notes" rows="3"></textarea>
-        <button type="submit">Add Client</button>
-      </form>
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="brand">
+    <img src="{{ url_for('static', filename='logo.png') }}">
+    <div>
+      <h3>CargoBloc</h3>
+      <div style="font-size:12px;">Logistics Suite</div>
     </div>
+  </div>
 
-    <div style="margin-top:12px;">
-      <h4 style="margin:4px 0 8px 0;">Clients</h4>
+  <nav class="nav">
+    <a class="active">Dashboard</a>
+    <a href="{{ url_for('clients_page') }}">Clients</a>
+    <a href="{{ url_for('receipts_home') }}">Receipts</a>
+    <a href="{{ url_for('house_bl') }}">House BLs</a>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </nav>
 
-      <!-- Short summary + link to full clients page -->
-      <div style="background:#fff; padding:12px; border-radius:10px; box-shadow:0 6px 18px rgba(3,7,18,0.04);">
-        <p style="margin:0 0 8px 0; color:#374151;">
-          Manage all clients on the dedicated Clients page.
-          <br><small style="color:#6b7280;">(Open, add BLs, export and more)</small>
-        </p>
+  <small>Last login: Today</small>
+</aside>
 
-        <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-          <a href="{{ url_for('clients_page') }}"
-             class="btn"
-             style="background:var(--accent); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
-             Open Clients Page
-          </a>
+<!-- MAIN -->
+<main class="main">
+<img src="{{ url_for('static', filename='logo.png') }}" class="watermark">
 
-          <a href="{{ url_for('client_detail', client_id=clients[0].id) if clients else url_for('generate_receipt') }}"
-             style="color:#2563eb; text-decoration:none; font-weight:600;">
-            Quick: Open first client
-          </a>
-        </div>
-      </div>
+<header class="top">
+  <h1>Dashboard</h1>
+</header>
+
+<!-- STATS -->
+<section class="cards">
+  <div class="card">
+    <h4>Total Billed</h4>
+    <div class="value">₵{{ '%.2f'|format(total_billed) }}</div>
+  </div>
+  <div class="card">
+    <h4>Total Paid</h4>
+    <div class="value" style="color:var(--green);">
+      ₵{{ '%.2f'|format(total_paid) }}
     </div>
-
-  </div> <!-- ✅ END LEFT COLUMN -->
-
-
-  <!-- RIGHT COLUMN -->
-  <div style="flex:0.5; min-width:320px;">
-
-    <div class="card" style="margin-bottom:12px;">
-      <h4>Quick Actions</h4>
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <a href="{{ url_for('home') }}" class="btn"
-           style="background:var(--deep-blue); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
-           Refresh
-        </a>
-
-        <a href="{{ url_for('export_all_filtered', date=request.args.get('date', '')) }}"
-           class="btn"
-           style="background:#fff; border:1px solid #e6eefb; padding:8px 12px; border-radius:8px; text-decoration:none; color:var(--text);">
-          Export All
-        </a>
-
-        <a href="#" class="btn"
-           style="background:var(--accent); color:#fff; padding:8px 12px; border-radius:8px; text-decoration:none;">
-          New Report
-        </a>
-      </div>
+  </div>
+  <div class="card">
+    <h4>Outstanding</h4>
+    <div class="value" style="color:var(--red);">
+      ₵{{ '%.2f'|format(total_unpaid) }}
     </div>
+    {% if total_unpaid > 0 %}
+      <span class="badge red">Overdue Risk</span>
+    {% else %}
+      <span class="badge green">Cleared</span>
+    {% endif %}
+  </div>
+</section>
 
-    <!-- ✅ RECENT ACTIVITY (NOW STAYS ON RIGHT) -->
-    <div class="card">
-      <h4>Recent Activity</h4>
-      <div style="font-size:13px; color:#6b7280;">
-        {% for c in clients[:6] %}
-          <div style="padding:8px 0; border-bottom:1px dashed #eef6ff;">
-            Added client: <strong>{{ c.name }}</strong>
+<!-- small quick metrics -->
+<div class="small-stats">
+  <div class="small-stat">
+    <div class="n">{{ receipts_today }}</div>
+    <div class="lbl">Receipts Today</div>
+  </div>
+  <div class="small-stat">
+    <div class="n">{{ receipts_7 }}</div>
+    <div class="lbl">Receipts (7d)</div>
+  </div>
+  <div class="small-stat">
+    <div class="n">{{ receipts_30 }}</div>
+    <div class="lbl">Receipts (30d)</div>
+  </div>
+  <div class="small-stat">
+    <div class="n">{{ cleared }}</div>
+    <div class="lbl">BLs Cleared</div>
+  </div>
+  <div class="small-stat">
+    <div class="n">{{ owing }}</div>
+    <div class="lbl">BLs Owing</div>
+  </div>
+</div>
+
+<section style="display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;">
+
+<!-- LEFT -->
+<div style="flex:0.45;min-width:320px;">
+  <div class="card add-client">
+    <h4>Add New Client</h4>
+    <form method="post" action="{{ url_for('add_client') }}">
+      <input name="name" placeholder="Client Name" required>
+      <input name="email" placeholder="Email">
+      <input name="phone" placeholder="Phone">
+      <textarea name="notes" placeholder="Notes"></textarea>
+      <button type="submit">Add Client</button>
+    </form>
+  </div>
+</div>
+
+<!-- RIGHT -->
+<div style="flex:0.5;min-width:320px;">
+  <div class="card" style="margin-bottom:12px;">
+    <h4>Quick Actions</h4>
+    <a href="{{ url_for('home') }}" class="btn">Refresh Dashboard</a>
+  </div>
+
+  <div class="card">
+    <h4>Recent Activity</h4>
+    <div style="font-size:13px;color:#6b7280;">
+      {% for a in activities[:6] %}
+        <div style="padding:8px 0;border-bottom:1px dashed #eef6ff;">
+          {{ a.text }}
+          {% if a.time %}
+          <div style="font-size:11px;color:#9ca3af;">
+            {{ a.time.strftime("%d %b %Y %H:%M") }}
           </div>
-        {% else %}
-          <div>No recent activity</div>
-        {% endfor %}
-      </div>
+          {% endif %}
+        </div>
+      {% else %}
+        <div>No recent activity</div>
+      {% endfor %}
     </div>
-
-  </div> <!-- ✅ END RIGHT COLUMN -->
+  </div>
+</div>
 
 </section>
-{% if selected_date %}
-<p style="margin:0 0 10px 0; color:#4b5563; font-size:13px;">
-  Showing BLs added on <strong>{{ selected_date }}</strong>
-</p>
-{% endif %}
 
-      <footer>© 2026 CargoBloc Logistics — Vision to reality</footer>
-    </main>
-  </div>
+<footer>©️ 2026 CargoBloc Logistics — Vision to reality</footer>
+</main>
+</div>
 </body>
 </html>"""
+
 CLIENT_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -1746,499 +1784,324 @@ CLIENT_HTML = """<!doctype html>
 <title>Client Overview — {{ client.name }}</title>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  .container {
-  animation: fadeIn 0.35s ease-in-out;
-}
+  :root{
+    --blue:#2563eb;
+    --accent:#00AEEF;
+    --green:#16a34a;
+    --red:#dc2626;
+    --muted:#6b7280;
+  }
+  html,body{height:100%;margin:0;font-family:'Poppins',sans-serif;color:#0b1220;background:url('{{ url_for('static', filename='port_bg.png') }}') no-repeat center center fixed;background-size:cover;}
+  .container{position:relative;max-width:980px;margin:40px auto;background:rgba(255,255,255,0.92);border-radius:14px;padding:22px;box-shadow:0 10px 30px rgba(0,0,0,0.12);overflow:hidden;}
+  .watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:0.06;pointer-events:none;z-index:0}
+  .watermark img{width:420px;height:auto}
+  h1{color:var(--blue);text-align:center;margin:6px 0 4px;font-size:22px;z-index:2;position:relative}
+  p.meta{text-align:center;color:var(--muted);margin:0 0 16px;z-index:2;position:relative}
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-  :root {
-    --blue: #2563eb;
-    --accent: #00AEEF;
-    --green: #16a34a;
-  }
-  html, body {
-    height:100%;
-    margin:0;
-    font-family:'Poppins',sans-serif;
-    background: url('{{ url_for('static', filename='port_bg.png') }}') no-repeat center center fixed;
-    background-size: cover;
-    color:#0b1220;
-  }
+  /* Buttons */
+  .action-btn{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:10px;font-weight:600;cursor:pointer;transition:all .18s; text-decoration:none}
+  .action-btn.add{background:linear-gradient(135deg,rgba(37,99,235,0.88),rgba(0,174,239,0.88));color:#fff;border:0;box-shadow:0 6px 18px rgba(37,99,235,0.22)}
+  .action-btn.upload{background:rgba(255,255,255,0.82);color:var(--blue);border:2px solid rgba(37,99,235,0.12)}
+  .action-btn.export{background:rgba(255,255,255,0.9);color:var(--accent);border:2px solid rgba(0,174,239,0.12)}
+  .action-btn.back{background:rgba(255,255,255,0.9);color:var(--blue);border:2px solid rgba(37,99,235,0.12)}
+  .action-btn:active{transform:translateY(1px)}
+  .icon-btn{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.9);border:1px solid rgba(0,0,0,0.04);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+  .icon-btn.blue{color:var(--blue);border-color:rgba(37,99,235,0.15)}
+  .icon-btn.red{color:var(--red);border-color:rgba(220,38,38,0.15)}
 
-  .container {
-    position: relative;
-    max-width: 950px;
-    margin: 40px auto;
-    background: rgba(255,255,255,0.9);
-    border-radius: 16px;
-    padding: 25px;
-    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
-    overflow: hidden;
-  }
+  /* Top summary card */
+  .summary-card{display:flex;gap:14px;flex-wrap:wrap;justify-content:space-between;align-items:center;background:white;padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.04);position:relative;z-index:2}
+  .summary-item{flex:1;min-width:140px;text-align:center}
+  .summary-item small{display:block;color:var(--muted);margin-bottom:6px}
+  .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-weight:700}
 
-  /* ✅ WATERMARK */
-  .watermark {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    opacity: 0.07;
-    z-index: 0;
-    pointer-events: none;
-  }
-  .watermark img {
-    width: 450px;
-    height: auto;
-    object-fit: contain;
-  }
+  /* Main card */
+  .card{margin-top:18px;padding:14px;background:white;border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,0.05);position:relative;z-index:2}
 
-  h1, p, .card, footer, form, a, button {
-    position: relative;
-    z-index: 2;
-  }
+  /* Add client edit box */
+  #editClientForm{display:none;margin:12px auto 10px;max-width:420px;background:rgba(255,255,255,0.98);border-radius:10px;padding:14px;box-shadow:0 2px 10px rgba(0,0,0,0.06)}
+  input[type="text"], input[type="email"], textarea, input[type="number"]{width:100%;padding:8px;border-radius:8px;border:1px solid #e6eefb;margin:8px 0;box-sizing:border-box;background:rgba(255,255,255,0.98)}
+  .form-row{display:flex;gap:8px}
+  .form-row input{flex:1}
 
-  h1 {
-    color: var(--blue);
-    text-align:center;
-    margin:0 0 8px;
-    font-size:24px;
-  }
-  p.meta {
-    text-align:center;
-    color:#374151;
-    margin:5px 0 20px;
-  }
+  /* BL list */
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .controls input[type="text"]{padding:8px;border-radius:10px;border:1px solid #d1d5db;width:280px}
+  .bl-list{max-height:360px;overflow-y:auto;border-radius:8px;border:1px solid #eef2f6;background:#fff;padding:6px}
+  .bl-row{display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;margin-bottom:6px;align-items:flex-start}
+  .bl-text{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .bl-meta{font-size:13px;color:var(--muted);margin-top:4px}
+  .bl-row.unpaid{background:linear-gradient(90deg,rgba(220,38,38,0.04),transparent);border-left:4px solid var(--red);}
 
-  /* BUTTON STYLES */
-  .action-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 10px 18px;
-    font-size: 14px;
-    font-weight: 600;
-    border-radius: 10px;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    font-family: 'Poppins', sans-serif;
-    letter-spacing: 0.2px;
-  }
+  /* small helpers */
+  .muted{color:var(--muted);font-size:13px}
+  .top-actions{display:flex;gap:8px;align-items:center}
 
-  /* Add BL */
-  .action-btn.add {
-    color: #fff;
-    border-color: #2563eb;
-    background: linear-gradient(135deg, rgba(37,99,235,0.85), rgba(0,174,239,0.85));
-    backdrop-filter: blur(6px);
-    box-shadow: 0 4px 16px rgba(37,99,235,0.25);
-  }
-  .action-btn.add:hover {
-    background: linear-gradient(135deg, rgba(37,99,235,0.95), rgba(0,174,239,0.95));
-    transform: translateY(-2px);
-  }
-
-  /* Upload BL */
-  .action-btn.upload {
-    background: rgba(255,255,255,0.6);
-    border: 2px solid #2563eb;
-    color: #2563eb;
-    backdrop-filter: blur(6px);
-  }
-  .action-btn.upload:hover {
-    background: rgba(255,255,255,0.85);
-    transform: translateY(-2px);
-  }
-
-  /* Export (used for both Export All & Selected) */
-  .action-btn.export {
-    background: rgba(255, 255, 255, 0.6);
-    border: 2px solid #00AEEF;
-    color: #00AEEF;
-    font-weight: 600;
-    backdrop-filter: blur(6px);
-    border-radius: 10px;
-    padding: 10px 18px;
-    font-size: 14px;
-    transition: all 0.25s ease;
-    box-shadow: 0 2px 8px rgba(0,174,239,0.2);
-  }
-  .action-btn.export:hover {
-    background: linear-gradient(135deg, rgba(0,174,239,0.15), rgba(37,99,235,0.15));
-    transform: translateY(-2px);
-  }
-
-  /* Back Button */
-  .action-btn.back {
-    background: rgba(255,255,255,0.7);
-    color: #2563eb;
-    border: 2px solid #2563eb;
-    border-radius: 10px;
-    font-weight: 600;
-    padding: 9px 16px;
-    text-decoration: none;
-    backdrop-filter: blur(6px);
-    transition: all 0.25s ease;
-  }
-  .action-btn.back:hover {
-    background: rgba(37,99,235,0.1);
-    transform: translateY(-2px);
-  }
-
-  /* Icon buttons (View, Pay, Delete) */
-  .icon-btn {
-    position: relative;
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    background: rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(6px);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    font-size: 16px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-  }
-  .icon-btn.blue { border-color: #2563eb; color: #2563eb; }
-  .icon-btn.green { border-color: #16a34a; color: #16a34a; }
-  .icon-btn.red { border-color: #dc2626; color: #dc2626; }
-  .icon-btn:hover {
-    box-shadow: 0 0 10px currentColor, 0 3px 10px rgba(0,0,0,0.2);
-    transform: translateY(-2px);
-    background: rgba(255,255,255,0.8);
-  }
-
-  .card {
-    margin-top:20px;
-    padding:16px;
-    background:white;
-    border-radius:12px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.05);
-  }
-
-  .bl-row {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:10px;
-    border-bottom:1px solid #e5e7eb;
-  }
-
-  footer {
-    text-align:center;
-    color:#93c5fd;
-    font-size:13px;
-    margin-top:20px;
-  }
-
-  input[type="text"], input[type="number"] {
-    border:1px solid #d1d5db;
-    border-radius:6px;
-    padding:6px 8px;
+  @media(max-width:800px){
+    .summary-card{flex-direction:column;align-items:stretch}
+    .controls input[type="text"]{width:100%}
   }
 </style>
 </head>
 <body>
   <div class="container">
-    <div class="watermark">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="CargoBloc Watermark">
-    </div>
+    <div class="watermark"><img src="{{ url_for('static', filename='logo.png') }}" alt="logo"></div>
 
     <a href="{{ url_for('clients_page') }}" class="action-btn back">← Back</a>
-    <h1 style="display:flex; justify-content:center; align-items:center; gap:10px;">
-  Client Overview
-  <button type="button" onclick="toggleEditClient()" class="action-btn upload" style="padding:6px 12px; font-size:13px;">✏ Edit</button>
-</h1>
+    <h1>Client Overview</h1>
+
     <p class="meta">{{ client.name }} • {{ client.email or '-' }} • {{ client.phone or '-' }}</p>
-    <div class="card" style="display:flex; gap:16px; flex-wrap:wrap; text-align:center;">
 
-  <div style="flex:1; min-width:140px;">
-    <small>Total Billed</small>
-    <h3 style="margin:4px 0;">₵{{ '%.2f'|format(total_billed) }}</h3>
+    <!-- SUMMARY -->
+    <div class="summary-card">
+      <div class="summary-item">
+        <small>Total Billed</small>
+        <div class="value">₵{{ '%.2f'|format(total_billed) }}</div>
+      </div>
+      <div class="summary-item">
+        <small>Total Paid</small>
+        <div class="value" style="color:var(--green)">₵{{ '%.2f'|format(total_paid) }}</div>
+      </div>
+      <div class="summary-item">
+        <small>Outstanding</small>
+        <div class="value" style="color:var(--red)">₵{{ '%.2f'|format(total_unpaid) }}</div>
+      </div>
+      <div class="summary-item">
+        <small>Status</small>
+        <div style="margin-top:6px;">
+          {% if finance_status == 'Cleared' %}
+            <span class="badge" style="background:#dcfce7;color:#166534">Cleared</span>
+          {% elif finance_status == 'Part Paid' %}
+            <span class="badge" style="background:#fef9c3;color:#854d0e">Part Paid</span>
+          {% elif finance_status == 'Owing' %}
+            <span class="badge" style="background:#fee2e2;color:#991b1b">Owing</span>
+          {% else %}
+            <span class="badge" style="background:#eef2f6;color:#374151">No BLs</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- EDIT CLIENT (hidden) -->
+    <div id="editClientForm">
+      <form method="post">
+        <input type="hidden" name="action" value="edit_client">
+        <input name="name" value="{{ client.name }}" placeholder="Client Name" required>
+        <input name="email" value="{{ client.email }}" placeholder="Email">
+        <input name="phone" value="{{ client.phone }}" placeholder="Phone">
+        <textarea name="notes" rows="3" placeholder="Notes">{{ client.notes or '' }}</textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="action-btn upload" onclick="toggleEditClient()">Cancel</button>
+          <button type="submit" class="action-btn add">Save Changes</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <h3 style="margin:0">BL List</h3>
+
+        <div class="top-actions">
+          <button type="button" onclick="toggleForm()" class="action-btn add">➕ Add BL</button>
+          <button type="button" onclick="toggleMultiBl()" class="action-btn add">➕➕ Add Multiple BLs</button>
+          <button type="button" onclick="toggleUpload()" class="action-btn upload">Upload BL</button>
+        </div>
+      </div>
+
+      <!-- SEARCH + FILTER -->
+      <div class="controls" style="margin-top:12px">
+        <input id="blSearchInput" type="text" placeholder="Enter BL number or keyword…" />
+        <button type="button" class="action-btn upload" onclick="doSearch()">Search BL</button>
+        <button type="button" class="action-btn upload" onclick="toggleUnpaidFilter()" id="unpaidBtn">Unpaid</button>
+        <div style="margin-left:8px" class="muted">Select BLs → Export Selected</div>
+      </div>
+
+      <!-- ADD BL FORM -->
+      <div id="addBlForm" style="display:none;margin-top:10px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.98);box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+        <form method="post" enctype="multipart/form-data">
+          <input type="hidden" name="action" value="add_bl">
+          <div class="form-row">
+            <input name="bl_number" placeholder="BL Number" required>
+            <input name="amount_total" placeholder="Total Amount" type="number" step="0.01" required>
+          </div>
+          <div style="margin-top:8px">
+            <input type="file" name="bl_document" accept=".pdf,.jpg,.png,.docx">
+          </div>
+          <div style="margin-top:8px;text-align:right">
+            <button type="button" class="action-btn upload" onclick="toggleForm()">Cancel</button>
+            <button type="submit" class="action-btn add">Save</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ADD MULTIPLE BLs -->
+      <div id="addMultiBlForm" style="display:none;margin-top:10px;padding:12px;border-radius:10px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+        <form method="post">
+          <input type="hidden" name="action" value="add_multi_bl">
+          <div id="multiBlRows">
+            <div class="multi-bl-row" style="display:flex;gap:8px;margin-bottom:8px">
+              <input name="bl_number[]" placeholder="BL Number" required style="flex:2">
+              <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1">
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px;justify-content:flex-end">
+            <button type="button" class="action-btn upload" onclick="addBlRow()">➕ Add another BL</button>
+            <button type="button" class="action-btn upload" onclick="toggleMultiBl()">Cancel</button>
+            <button type="submit" class="action-btn add">Save All BLs</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- UPLOAD BL FORM -->
+      <div id="uploadBlForm" style="display:none;margin-top:10px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.98);box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+        <form method="post" enctype="multipart/form-data">
+          <input type="hidden" name="action" value="add_doc">
+          <input name="doc_desc" placeholder="Document Description">
+          <input type="file" name="client_document" accept=".pdf,.jpg,.png,.docx" required>
+          <div style="margin-top:8px;text-align:right">
+            <button type="button" class="action-btn upload" onclick="toggleUpload()">Cancel</button>
+            <button type="submit" class="action-btn upload">Upload</button>
+          </div>
+        </form>
+      </div>
+
+      {% if info %}
+        <div style="background:rgba(59,130,246,0.12);border-left:3px solid #2563eb;color:#1e3a8a;padding:10px 12px;border-radius:8px;margin-top:12px">
+          {{ info }}
+        </div>
+      {% endif %}
+
+      <!-- BL LIST + EXPORT -->
+      <form id="exportForm" method="post" style="margin-top:12px">
+        <input type="hidden" name="action" value="export_selected_bl">
+
+        <div class="bl-list" id="blList">
+          {% for bl in client.bls %}
+            <div class="bl-row {% if bl.amount_unpaid > 0 %}unpaid{% endif %}">
+              <div style="display:flex;align-items:center;gap:10px">
+                <input type="checkbox" name="bl_ids" value="{{ bl.id }}">
+              </div>
+
+              <div class="bl-text">
+                <strong>{{ bl.bl_number }}</strong>
+                <div class="bl-meta">Outstanding: ₵{{ '%.2f'|format(bl.amount_unpaid) }}</div>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center">
+                {% if bl.document %}
+                  <a href="{{ url_for('uploaded_file', filename=bl.document) }}" target="_blank" class="icon-btn blue" title="View Document">
+                    <img src="{{ url_for('static', filename='icon_view.png') }}" alt="view" style="width:16px;height:16px">
+                  </a>
+                {% endif %}
+                <a href="{{ url_for('delete_bl', bl_id=bl.id) }}" class="icon-btn red" title="Delete BL" onclick="return confirm('Delete this BL?')">
+                  <img src="{{ url_for('static', filename='icon_delete.png') }}" alt="del" style="width:14px;height:14px">
+                </a>
+              </div>
+            </div>
+          {% else %}
+            <p class="muted">No BLs yet.</p>
+          {% endfor %}
+        </div>
+
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end">
+          <button type="submit" class="action-btn export">Export Selected BLs</button>
+        </div>
+      </form>
+
+      <!-- single Export All (bottom) -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+        <a href="{{ url_for('export_client_pdf', client_id=client.id) }}" class="action-btn export">Export All</a>
+        <p style="color:#4b5563;margin:0">Notes: {{ client.notes or '—' }}</p>
+      </div>
+    </div>
+
+    <footer style="margin-top:18px;text-align:center;color:#93c5fd">©️ 2026 CargoBloc Logistics — Vision to Reality</footer>
   </div>
-
-  <div style="flex:1; min-width:140px;">
-    <small>Total Paid</small>
-    <h3 style="margin:4px 0; color:#16a34a;">₵{{ '%.2f'|format(total_paid) }}</h3>
-  </div>
-
-  <div style="flex:1; min-width:140px;">
-    <small>Outstanding</small>
-    <h3 style="margin:4px 0; color:#dc2626;">₵{{ '%.2f'|format(total_unpaid) }}</h3>
-  </div>
-
-  <div style="flex:1; min-width:140px;">
-    <small>Status</small><br>
-    <span style="
-      display:inline-block;
-      margin-top:6px;
-      padding:4px 12px;
-      border-radius:999px;
-      font-size:13px;
-      font-weight:600;
-      background:
-        {% if finance_status == 'Cleared' %}#dcfce7
-        {% elif finance_status == 'Part Paid' %}#fef9c3
-        {% elif finance_status == 'Owing' %}#fee2e2
-        {% else %}#e5e7eb{% endif %};
-      color:
-        {% if finance_status == 'Cleared' %}#166534
-        {% elif finance_status == 'Part Paid' %}#854d0e
-        {% elif finance_status == 'Owing' %}#991b1b
-        {% else %}#374151{% endif %};
-    ">
-      {{ finance_status }}
-    </span>
-  </div>
-
-</div>
-<div id="editClientForm" style="display:none; margin:15px auto 10px; max-width:400px; background:rgba(255,255,255,0.95); border-radius:10px; padding:14px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-  <form method="post">
-    <input type="hidden" name="action" value="edit_client">
-    <input name="name" value="{{ client.name }}" placeholder="Client Name" required style="width:100%; margin:5px 0; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">
-    <input name="email" value="{{ client.email }}" placeholder="Email" style="width:100%; margin:5px 0; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">
-    <input name="phone" value="{{ client.phone }}" placeholder="Phone" style="width:100%; margin:5px 0; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">
-    <textarea name="notes" placeholder="Notes" rows="3" style="width:100%; margin:5px 0; padding:8px; border:1px solid #e5e7eb; border-radius:8px;">{{ client.notes or '' }}</textarea>
-    <button type="submit" class="action-btn add" style="margin-top:6px;"> Save Changes</button>
-  </form>
-</div>
 
 <script>
-function toggleForm() {
+/* Toggle forms */
+function toggleForm(){
   const f = document.getElementById('addBlForm');
   f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
   document.getElementById('uploadBlForm').style.display = 'none';
   document.getElementById('addMultiBlForm').style.display = 'none';
 }
-
-function toggleUpload() {
-  const f = document.getElementById('uploadBlForm');
-  f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
-  document.getElementById('addBlForm').style.display = 'none';
-  document.getElementById('addMultiBlForm').style.display = 'none';
-}
-
-function toggleMultiBl() {
+function toggleMultiBl(){
   const f = document.getElementById('addMultiBlForm');
   f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
   document.getElementById('addBlForm').style.display = 'none';
   document.getElementById('uploadBlForm').style.display = 'none';
 }
-</script>
+function toggleUpload(){
+  const f = document.getElementById('uploadBlForm');
+  f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
+  document.getElementById('addBlForm').style.display = 'none';
+  document.getElementById('addMultiBlForm').style.display = 'none';
+}
+function toggleEditClient(){
+  const f = document.getElementById('editClientForm');
+  f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
-    <div class="card">
-      <h3 style="display:flex; justify-content:space-between; align-items:center;">
-        <span>BL List</span>
-        <span style="display:flex; gap:8px;">
-          <button type="button" onclick="toggleForm()" class="action-btn add">➕ Add BL</button>
-          <button type="button" onclick="toggleMultiBl()" class="action-btn add">➕➕ Add Multiple BLs</button>
-          <button type="button" onclick="toggleUpload()" class="action-btn upload"> Upload BL</button>
-        </span>
-      </h3>
-
-      <!-- Add BL Form -->
-      <div id="addBlForm" style="display:none; margin-top:10px; background:rgba(255,255,255,0.95); border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <form method="post" enctype="multipart/form-data">
-          <input type="hidden" name="action" value="add_bl">
-          <input name="bl_number" placeholder="BL Number" required>
-          <input name="amount_total" placeholder="Total Amount" type="number" step="0.01" required>
-          <input name="amount_paid" placeholder="Amount Paid" type="number" step="0.01">
-          <input type="file" name="bl_document" accept=".pdf,.jpg,.png,.docx">
-          <button type="submit" class="action-btn add" style="margin-top:6px;">Save</button>
-        </form>
-      </div>
-    
-     <!-- ADD MULTIPLE BLs (ROW BASED) -->
-<div id="addMultiBlForm" style="display:none; margin-top:10px; background:#fff; border-radius:10px; padding:14px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-
-  <form method="post">
-    <input type="hidden" name="action" value="add_multi_bl">
-
-    <div id="multiBlRows">
-      <div class="multi-bl-row" style="display:flex; gap:8px; margin-bottom:8px;">
-        <input name="bl_number[]" placeholder="BL Number" required style="flex:2;">
-        <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1;">
-        <input name="amount_paid[]" placeholder="Paid ₵" type="number" step="0.01" style="flex:1;">
-      </div>
-    </div>
-
-    <button type="button" onclick="addBlRow()" class="action-btn upload" style="margin-top:6px;">
-      ➕ Add another BL
-    </button>
-
-    <button type="submit" class="action-btn add" style="margin-top:10px;">
-      Save All BLs
-    </button>
-  </form>
-</div>
-
-<script>
-function addBlRow() {
+/* Add row for multiple BLs */
+function addBlRow(){
   const container = document.getElementById('multiBlRows');
   const row = document.createElement('div');
+  row.className = 'multi-bl-row';
   row.style.display = 'flex';
   row.style.gap = '8px';
   row.style.marginBottom = '8px';
-
   row.innerHTML = `
-    <input name="bl_number[]" placeholder="BL Number" required style="flex:2;">
-    <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1;">
-    <input name="amount_paid[]" placeholder="Paid ₵" type="number" step="0.01" style="flex:1;">
+    <input name="bl_number[]" placeholder="BL Number" required style="flex:2">
+    <input name="amount_total[]" placeholder="Total ₵" type="number" step="0.01" style="flex:1">
   `;
   container.appendChild(row);
 }
-</script>
-    
 
-      <!-- Upload BL Form -->
-      <div id="uploadBlForm" style="display:none; margin-top:10px; background:rgba(255,255,255,0.95); border-radius:8px; padding:12px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-        <form method="post" enctype="multipart/form-data">
-          <input type="hidden" name="action" value="add_doc">
-          <input name="doc_desc" placeholder="Document Description">
-          <input type="file" name="client_document" accept=".pdf,.jpg,.png,.docx" required>
-          <button type="submit" class="action-btn upload" style="margin-top:6px;">Upload</button>
-        </form>
-      </div>
-
-      <script>
-      function toggleForm() {
-        const f = document.getElementById('addBlForm');
-        f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
-        document.getElementById('uploadBlForm').style.display = 'none';
-      }
-      function toggleUpload() {
-        const f = document.getElementById('uploadBlForm');
-        f.style.display = (f.style.display === 'none' || f.style.display === '') ? 'block' : 'none';
-        document.getElementById('addBlForm').style.display = 'none';
-      }
-      </script>
-
-      {% if info %}
-        <div style="background:rgba(59,130,246,0.12); border-left:3px solid #2563eb; color:#1e3a8a; padding:10px 12px; border-radius:8px; margin-bottom:10px;">
-          {{ info }}
-        </div>
-      {% endif %}
-
-      <!-- ===== START: BL list + export (no nested forms) ===== -->
-<!-- Export Selected BLs form (wraps checkboxes only) -->
-<form id="exportForm" method="post" style="margin-bottom:8px;">
-  <input type="hidden" name="action" value="export_selected_bl">
-
-
-
-  {% for bl in client.bls %}
-  <div class="bl-row">
-  <input type="checkbox" name="bl_ids" value="{{ bl.id }}">
-  <div style="flex:1;">
-    <strong>{{ bl.bl_number }}</strong><br>
-    Outstanding: ₵{{ "%.2f"|format(bl.amount_unpaid) }}
-  </div>
-</div>
-
-    <div style="display:flex; gap:8px; align-items:center;">
-      {% if bl.document %}
-        <a href="{{ url_for('uploaded_file', filename=bl.document) }}" target="_blank" class="icon-btn blue" title="View Document">
-          <img src="{{ url_for('static', filename='icon_view.png') }}" style="width:18px; height:18px;">
-        </a>
-      {% endif %}
-
-      <!-- Payment input + JS button (no nested form) -->
-      <input id="pay-input-{{ bl.id }}" name="extra_payment" type="number" step="0.01" placeholder="₵ amount" style="width:90px; padding:6px; border-radius:6px; border:1px solid #d1d5db;">
-
-      <button type="button" onclick="recordPayment({{ bl.id }})" class="icon-btn green" title="Record Payment">
-        <img src="{{ url_for('static', filename='icon_pay.png') }}" style="width:18px; height:18px;">
-      </button>
-
-      <a href="{{ url_for('delete_bl', bl_id=bl.id) }}" class="icon-btn red" title="Delete BL" onclick="return confirm('Delete this BL?')">
-        <img src="{{ url_for('static', filename='icon_delete.png') }}" style="width:18px; height:18px;">
-      </a>
-    </div>
-  </div>
-  {% else %}
-    <p>No BLs yet.</p>
-  {% endfor %}
-
-  <div style="margin-top:12px;">
-    <button type="submit" class="action-btn export">Export Selected BLs</button>
-  </div>
-</form>
-
-<!-- Export All -->
-<div style="margin-top:10px;">
-  <a href="{{ url_for('export_client_pdf', client_id=client.id) }}" class="action-btn export"> Export All</a>
-</div>
-
-<script>
-/**
- * Send payment via fetch to the same client endpoint.
- * Expects your server to accept POST with form fields:
- *   action=record_payment, bl_id, extra_payment
- */
-async function recordPayment(blId) {
-  try {
-    const input = document.getElementById('pay-input-' + blId);
-    const amt = input ? input.value.trim() : '';
-    if (!amt || isNaN(amt) || Number(amt) <= 0) {
-      alert('Please enter a valid payment amount.');
-      return;
-    }
-
-    // Build form data
-    const fd = new FormData();
-    fd.append('action', 'record_payment');
-    fd.append('bl_id', String(blId));
-    fd.append('extra_payment', String(amt));
-
-    // POST to the current client URL (same endpoint)
-    const resp = await fetch(window.location.pathname, {
-      method: 'POST',
-      body: fd,
-      credentials: 'same-origin',
-      headers: {
-        // no Content-Type header so browser sets multipart/form-data correctly
-      }
-    });
-
-    if (!resp.ok) {
-      const txt = await resp.text();
-      console.error('Payment failed', resp.status, txt);
-      alert('Payment failed. Check server logs (see console).');
-      return;
-    }
-
-    // success -> reload to reflect updated amounts
-    window.location.reload();
-  } catch (err) {
-    console.error(err);
-    alert('An error occurred while recording payment.');
-  }
+/* Search and unpaid filter */
+let unpaidOnly = false;
+function doSearch(){
+  const q = (document.getElementById('blSearchInput').value || '').toLowerCase().trim();
+  document.querySelectorAll('.bl-list .bl-row').forEach(row => {
+    const text = row.innerText.toLowerCase();
+    const matches = q === '' ? true : text.includes(q);
+    row.style.display = matches ? 'flex' : 'none';
+  });
 }
+function toggleUnpaidFilter(){
+  unpaidOnly = !unpaidOnly;
+  const btn = document.getElementById('unpaidBtn');
+  btn.style.background = unpaidOnly ? 'linear-gradient(135deg,rgba(37,99,235,0.9),rgba(0,174,239,0.9))' : '';
+  document.querySelectorAll('.bl-list .bl-row').forEach(row => {
+    if(unpaidOnly){
+      row.style.display = row.classList.contains('unpaid') ? 'flex' : 'none';
+    } else {
+      row.style.display = 'flex';
+      doSearch(); // reapply search filter if any
+    }
+  });
+}
+
+/* live search as user types */
+document.getElementById('blSearchInput').addEventListener('input', function(){
+  const q = this.value.toLowerCase().trim();
+  document.querySelectorAll('.bl-list .bl-row').forEach(row => {
+    const text = row.innerText.toLowerCase();
+    const visible = text.includes(q);
+    // apply unpaidOnly filter too
+    if(unpaidOnly){
+      row.style.display = (visible && row.classList.contains('unpaid')) ? 'flex' : 'none';
+    } else {
+      row.style.display = visible ? 'flex' : 'none';
+    }
+  });
+});
 </script>
-<!-- ===== END: BL list + export ===== -->
-    </div>
-
-    <div style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
-      <a href="{{ url_for('export_client_pdf', client_id=client.id) }}" class="action-btn export"> Export All</a>
-      <p style="color:#4b5563;">Notes: {{ client.notes or '—' }}</p>
-    </div>
-
-    <footer>© 2025 CargoBloc Logistics — Vision to Reality </footer>
-  </div>
 </body>
 </html>"""
+
 CLIENTS_PAGE_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -2627,6 +2490,55 @@ RECEIPT_UI_HTML = """
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
 
 <style>
+/* CargoBloc glass toggle button */
+.btn.glass{
+  background: rgba(255,255,255,0.25);
+  color: #2563eb;
+  border: 1.5px solid rgba(37,99,235,0.35);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 18px rgba(37,99,235,0.15);
+}
+
+/* Active glass state (NO RED) */
+.btn.glass.active{
+  background: rgba(255,255,255,0.4);
+  box-shadow: inset 0 0 0 2px rgba(37,99,235,0.35),
+              0 6px 20px rgba(37,99,235,0.25);
+  color:#2563eb;
+}
+
+/* Unpaid highlight — CargoBloc glass feel */
+.bl-item.unpaid-active{
+  background: rgba(220, 38, 38, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.25);
+  backdrop-filter: blur(6px);
+}
+/* UNPAID TOGGLE BUTTON */
+.unpaid-btn{
+  padding:10px 14px;
+  border-radius:999px;
+  border:1px solid rgba(37,99,235,0.35);
+  background:rgba(255,255,255,0.55);
+  color:#2563eb;
+  font-weight:600;
+  cursor:pointer;
+  backdrop-filter: blur(6px);
+  transition:all 0.2s ease;
+  white-space:nowrap;
+}
+
+.unpaid-btn.active{
+  background:linear-gradient(135deg, rgba(37,99,235,0.85), rgba(0,174,239,0.85));
+  color:#fff;
+  border-color:transparent;
+  box-shadow:0 4px 14px rgba(37,99,235,0.35);
+}
+
+/* UNPAID BL HIGHLIGHT */
+.bl-item.unpaid-highlight{
+  background:rgba(254,226,226,0.65);
+  border-left:4px solid #dc2626;
+}
 body{
   font-family:'Poppins',sans-serif;
   background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
@@ -2818,16 +2730,46 @@ input, select{
 <div class="card">
   <h3>Client BLs</h3>
 
-  <div style="display:flex; gap:8px; margin-bottom:12px;">
+  <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
   <input class="bl-search"
          placeholder="Search BL..."
          id="blSearchInput"
          style="flex:1;">
+
   <button type="button"
           class="btn"
           onclick="filterBLs(document.getElementById('blSearchInput').value)">
     Search
   </button>
+
+  <button type="button"
+          id="unpaidToggle"
+          class="unpaid-btn"
+          onclick="toggleUnpaid()">
+    Unpaid
+  </button>
+</div>
+<!-- SELECT ALL -->
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+  <label style="
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 14px;
+    border-radius:12px;
+    background:rgba(255,255,255,0.55);
+    backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,0.6);
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+  ">
+    <input type="checkbox"
+           id="selectAllBLs"
+           style="width:16px;height:16px;"
+           onchange="toggleSelectAll(this)">
+    Select All
+  </label>
 </div>
 
   <div class="bl-list" id="blList">
@@ -2876,6 +2818,22 @@ input, select{
        readonly
        required>
 
+  <!-- PAYMENT TYPE -->
+<label style="margin-top:14px;">Payment Type</label>
+<select name="payment_type" id="paymentType" onchange="toggleTransactionId(this.value)" required>
+  <option value="MoMo">Mobile Money</option>
+  <option value="Bank">Bank Transfer</option>
+  <option value="Cash">Cash</option>
+</select>
+
+<!-- TRANSACTION ID -->
+<div id="transactionIdWrap">
+  <label style="margin-top:12px;">Transaction ID</label>
+  <input name="transaction_id"
+         id="transactionId"
+         placeholder="Enter transaction reference">
+</div>     
+
    <label style="margin-top:14px;">Description</label>
   <select name="description_type" onchange="toggleCustomDesc(this.value)">
     <option value="Amendment">Amendment</option>
@@ -2916,20 +2874,21 @@ input, select{
 
 
 <script>
-function filterBLs(q){
-  q = q.toLowerCase();
+/* ================= SEARCH BL ================= */
+let searchQuery = '';
 
-  document.querySelectorAll('#blList .bl-item').forEach(item => {
-    const text = item.innerText.toLowerCase();
-    item.style.display = text.includes(q) ? 'flex' : 'none';
-  });
+function filterBLs(q){
+  searchQuery = q.toLowerCase().trim();
+  applyFilters();
 }
 
+/* ================= CUSTOM DESCRIPTION ================= */
 function toggleCustomDesc(val){
   document.getElementById('customDesc').style.display =
     val === 'custom' ? 'block' : 'none';
 }
 
+/* ================= SUMMARY ================= */
 function updateSummary(){
   let total = 0;
   let count = 0;
@@ -2942,10 +2901,83 @@ function updateSummary(){
   document.getElementById('blCount').innerText = count;
   document.getElementById('blTotal').innerText = total.toFixed(2);
   document.getElementById('totalAmount').value = total.toFixed(2);
+
+  /* ✅ keep Select All in sync */
+  const visibleUnchecked =
+    document.querySelectorAll(
+      '#blList .bl-item:not([style*="display: none"]) input[type="checkbox"]:not(:checked)'
+    ).length;
+
+  const selectAll = document.getElementById('selectAllBLs');
+  if (selectAll){
+    selectAll.checked = visibleUnchecked === 0;
+  }
+}
+
+/* ================= UNPAID TOGGLE ================= */
+let unpaidActive = false;
+
+function toggleUnpaid(){
+  unpaidActive = !unpaidActive;
+  const btn = document.getElementById('unpaidToggle');
+
+  btn.classList.toggle('active', unpaidActive);
+  btn.innerText = unpaidActive ? 'Show All' : 'Unpaid';
+
+  applyFilters();
+}
+
+/* ================= SELECT ALL ================= */
+function toggleSelectAll(master){
+  const visibleBLs = document.querySelectorAll(
+    '#blList .bl-item:not([style*="display: none"]) input[type="checkbox"]'
+  );
+
+  visibleBLs.forEach(cb => {
+    cb.checked = master.checked;
+  });
+
+  updateSummary();
+}
+
+/* ================= APPLY BOTH FILTERS ================= */
+function applyFilters(){
+  document.querySelectorAll('#blList .bl-item').forEach(item => {
+    const text = item.innerText.toLowerCase();
+    const checkbox = item.querySelector('input[type="checkbox"]');
+    const unpaid = parseFloat(checkbox?.dataset.unpaid || 0);
+
+    const matchesSearch = text.includes(searchQuery);
+    const matchesUnpaid = !unpaidActive || unpaid > 0;
+
+    if (matchesSearch && matchesUnpaid){
+      item.style.display = 'flex';
+
+      if (unpaidActive && unpaid > 0){
+        item.classList.add('unpaid-highlight');
+      } else {
+        item.classList.remove('unpaid-highlight');
+      }
+    } else {
+      item.style.display = 'none';
+      item.classList.remove('unpaid-highlight');
+    }
+  });
+
+  updateSummary();
+}
+function toggleTransactionId(type){
+  const wrap = document.getElementById('transactionIdWrap');
+  const input = document.getElementById('transactionId');
+
+  if (type === 'Cash'){
+    wrap.style.display = 'none';
+    input.value = '';
+  } else {
+    wrap.style.display = 'block';
+  }
 }
 </script>
-
-
 </body>
 </html>
 """
@@ -3328,7 +3360,7 @@ th, td{
 
 <div class="section" style="right:90px; top:300px; text-align:right;">
   <strong>Receipt Summary</strong><br>
-  Total Paid: ₵{{ "%.2f"|format(receipt.amount) }}<br>
+  Transaction ID: {{ receipt.reference or 'CASH PAYMENT' }}<br>
   Currency: GHS<br>
   Payment Type: {{ receipt.method or '-' }}
 </div>

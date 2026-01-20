@@ -33,3 +33,583 @@
 2026-01-19 10:48:57,130 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on http://127.0.0.1:5000
 2026-01-19 10:48:57,130 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:27:05,845 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 11:27:05,845 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:27:30,527 INFO 127.0.0.1 - - [19/Jan/2026 11:27:30] "[32mGET / HTTP/1.1[0m" 302 -
+2026-01-19 11:27:30,540 INFO 127.0.0.1 - - [19/Jan/2026 11:27:30] "GET /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:27:30,643 INFO 127.0.0.1 - - [19/Jan/2026 11:27:30] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:27:32,942 INFO 127.0.0.1 - - [19/Jan/2026 11:27:32] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:27:37,838 INFO 127.0.0.1 - - [19/Jan/2026 11:27:37] "GET /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:27:39,539 INFO 127.0.0.1 - - [19/Jan/2026 11:27:39] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:29:17,374 INFO 127.0.0.1 - - [19/Jan/2026 11:29:17] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:29:21,563 INFO 127.0.0.1 - - [19/Jan/2026 11:29:21] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:35:29,797 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 11:35:29,797 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:36:51,607 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 11:36:51,607 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:36:56,620 INFO 127.0.0.1 - - [19/Jan/2026 11:36:56] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:37:01,817 INFO 127.0.0.1 - - [19/Jan/2026 11:37:01] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:40:01,929 INFO 127.0.0.1 - - [19/Jan/2026 11:40:01] "[31m[1mPOST /login?next=/ HTTP/1.1[0m" 400 -
+2026-01-19 11:41:04,766 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 11:41:04,766 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:41:11,096 INFO 127.0.0.1 - - [19/Jan/2026 11:41:11] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:41:11,177 INFO 127.0.0.1 - - [19/Jan/2026 11:41:11] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:41:14,687 INFO 127.0.0.1 - - [19/Jan/2026 11:41:14] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:41:14,727 INFO 127.0.0.1 - - [19/Jan/2026 11:41:14] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:41:29,549 INFO 127.0.0.1 - - [19/Jan/2026 11:41:29] "GET /forgot-password HTTP/1.1" 200 -
+2026-01-19 11:41:29,578 INFO 127.0.0.1 - - [19/Jan/2026 11:41:29] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:42:43,036 INFO 127.0.0.1 - - [19/Jan/2026 11:42:43] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:42:43,089 INFO 127.0.0.1 - - [19/Jan/2026 11:42:43] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:51:08,679 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 11:51:08,679 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 11:51:24,916 INFO 127.0.0.1 - - [19/Jan/2026 11:51:24] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:51:25,060 INFO 127.0.0.1 - - [19/Jan/2026 11:51:25] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:51:27,248 INFO 127.0.0.1 - - [19/Jan/2026 11:51:27] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:51:27,291 INFO 127.0.0.1 - - [19/Jan/2026 11:51:27] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:51:29,088 INFO 127.0.0.1 - - [19/Jan/2026 11:51:29] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:51:29,124 INFO 127.0.0.1 - - [19/Jan/2026 11:51:29] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:51:48,548 INFO 127.0.0.1 - - [19/Jan/2026 11:51:48] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:51:48,578 INFO 127.0.0.1 - - [19/Jan/2026 11:51:48] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 11:51:59,366 INFO 127.0.0.1 - - [19/Jan/2026 11:51:59] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 11:51:59,418 INFO 127.0.0.1 - - [19/Jan/2026 11:51:59] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 12:16:41,606 INFO 127.0.0.1 - - [19/Jan/2026 12:16:41] "POST /login?next=/ HTTP/1.1" 200 -
+2026-01-19 12:16:41,630 INFO 127.0.0.1 - - [19/Jan/2026 12:16:41] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 12:16:49,635 INFO 127.0.0.1 - - [19/Jan/2026 12:16:49] "GET /forgot-password HTTP/1.1" 200 -
+2026-01-19 12:16:49,688 INFO 127.0.0.1 - - [19/Jan/2026 12:16:49] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 12:17:15,815 INFO 127.0.0.1 - - [19/Jan/2026 12:17:15] "POST /forgot-password HTTP/1.1" 200 -
+2026-01-19 12:17:15,850 INFO 127.0.0.1 - - [19/Jan/2026 12:17:15] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 15:58:13,635 INFO 127.0.0.1 - - [19/Jan/2026 15:58:13] "GET /login HTTP/1.1" 200 -
+2026-01-19 15:58:13,756 INFO 127.0.0.1 - - [19/Jan/2026 15:58:13] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 15:58:16,387 INFO 127.0.0.1 - - [19/Jan/2026 15:58:16] "POST /login HTTP/1.1" 200 -
+2026-01-19 15:58:16,484 INFO 127.0.0.1 - - [19/Jan/2026 15:58:16] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:08:37,367 INFO 127.0.0.1 - - [19/Jan/2026 16:08:37] "POST /login HTTP/1.1" 200 -
+2026-01-19 16:08:37,470 INFO 127.0.0.1 - - [19/Jan/2026 16:08:37] "[36mGET /static/login_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:06,830 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 16:22:06,830 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 16:22:24,914 INFO 127.0.0.1 - - [19/Jan/2026 16:22:24] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-01-19 16:22:25,063 INFO 127.0.0.1 - - [19/Jan/2026 16:22:25] "GET / HTTP/1.1" 200 -
+2026-01-19 16:22:25,508 INFO 127.0.0.1 - - [19/Jan/2026 16:22:25] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:25,508 INFO 127.0.0.1 - - [19/Jan/2026 16:22:25] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:46,001 INFO 127.0.0.1 - - [19/Jan/2026 16:22:46] "GET /clients HTTP/1.1" 200 -
+2026-01-19 16:22:46,115 INFO 127.0.0.1 - - [19/Jan/2026 16:22:46] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:57,440 INFO 127.0.0.1 - - [19/Jan/2026 16:22:57] "GET / HTTP/1.1" 200 -
+2026-01-19 16:22:57,512 INFO 127.0.0.1 - - [19/Jan/2026 16:22:57] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:57,552 INFO 127.0.0.1 - - [19/Jan/2026 16:22:57] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:22:59,835 INFO 127.0.0.1 - - [19/Jan/2026 16:22:59] "GET /receipts HTTP/1.1" 200 -
+2026-01-19 16:22:59,956 INFO 127.0.0.1 - - [19/Jan/2026 16:22:59] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:02,630 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 16:23:02,835 INFO 127.0.0.1 - - [19/Jan/2026 16:23:02] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 16:23:11,655 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 16:23:11,663 INFO 127.0.0.1 - - [19/Jan/2026 16:23:11] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 16:23:27,782 INFO 127.0.0.1 - - [19/Jan/2026 16:23:27] "GET /receipts?q=emma&date= HTTP/1.1" 200 -
+2026-01-19 16:23:27,872 INFO 127.0.0.1 - - [19/Jan/2026 16:23:27] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:32,671 INFO 127.0.0.1 - - [19/Jan/2026 16:23:32] "GET / HTTP/1.1" 200 -
+2026-01-19 16:23:32,806 INFO 127.0.0.1 - - [19/Jan/2026 16:23:32] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:32,827 INFO 127.0.0.1 - - [19/Jan/2026 16:23:32] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:35,980 INFO 127.0.0.1 - - [19/Jan/2026 16:23:35] "GET /house_bl HTTP/1.1" 200 -
+2026-01-19 16:23:36,069 INFO 127.0.0.1 - - [19/Jan/2026 16:23:36] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:38,548 INFO 127.0.0.1 - - [19/Jan/2026 16:23:38] "GET / HTTP/1.1" 200 -
+2026-01-19 16:23:38,669 INFO 127.0.0.1 - - [19/Jan/2026 16:23:38] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:38,741 INFO 127.0.0.1 - - [19/Jan/2026 16:23:38] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:40,390 INFO 127.0.0.1 - - [19/Jan/2026 16:23:40] "GET /receipts HTTP/1.1" 200 -
+2026-01-19 16:23:40,510 INFO 127.0.0.1 - - [19/Jan/2026 16:23:40] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 16:23:42,557 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 16:23:42,565 INFO 127.0.0.1 - - [19/Jan/2026 16:23:42] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 16:26:27,883 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 16:26:27,899 INFO 127.0.0.1 - - [19/Jan/2026 16:26:27] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 20:03:39,395 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 20:03:39,780 INFO 127.0.0.1 - - [19/Jan/2026 20:03:39] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 20:03:45,052 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 20:03:45,062 INFO 127.0.0.1 - - [19/Jan/2026 20:03:45] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 20:52:18,812 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 20:52:18,822 INFO 127.0.0.1 - - [19/Jan/2026 20:52:18] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 20:52:19,911 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 20:52:19,932 INFO 127.0.0.1 - - [19/Jan/2026 20:52:19] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 20:52:37,412 INFO 127.0.0.1 - - [19/Jan/2026 20:52:37] "GET / HTTP/1.1" 200 -
+2026-01-19 20:52:37,516 INFO 127.0.0.1 - - [19/Jan/2026 20:52:37] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 20:52:37,552 INFO 127.0.0.1 - - [19/Jan/2026 20:52:37] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:39:12,525 INFO [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5000
+2026-01-19 23:39:12,525 INFO [33mPress CTRL+C to quit[0m
+2026-01-19 23:39:18,114 INFO 127.0.0.1 - - [19/Jan/2026 23:39:18] "GET / HTTP/1.1" 200 -
+2026-01-19 23:39:18,252 INFO 127.0.0.1 - - [19/Jan/2026 23:39:18] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 23:39:18,260 INFO 127.0.0.1 - - [19/Jan/2026 23:39:18] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:39:20,480 INFO 127.0.0.1 - - [19/Jan/2026 23:39:20] "GET /receipts HTTP/1.1" 200 -
+2026-01-19 23:39:20,524 INFO 127.0.0.1 - - [19/Jan/2026 23:39:20] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:39:23,137 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:23,219 INFO 127.0.0.1 - - [19/Jan/2026 23:39:23] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:25,533 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:25,535 INFO 127.0.0.1 - - [19/Jan/2026 23:39:25] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:26,465 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:26,469 INFO 127.0.0.1 - - [19/Jan/2026 23:39:26] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:26,934 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:26,936 INFO 127.0.0.1 - - [19/Jan/2026 23:39:26] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:27,437 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:27,441 INFO 127.0.0.1 - - [19/Jan/2026 23:39:27] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:28,062 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:28,062 INFO 127.0.0.1 - - [19/Jan/2026 23:39:28] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:39:29,117 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    backup_database()
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    shutil.copy("clients.db", f"backups/clients_{timestamp}.db")
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:39:29,119 INFO 127.0.0.1 - - [19/Jan/2026 23:39:29] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:50:39,021 ERROR Exception on /generate_receipt [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 845, in generate_receipt
+    bl_id=bl.id,
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 193, in backup_database
+    print("\u2705 Default login \u2192 username: admin | password: Cargo@conso123")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 419, in copy
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "C:\Users\DELL\AppData\Local\Programs\Python\Python311\Lib\shutil.py", line 256, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'clients.db'
+2026-01-19 23:50:39,137 INFO 127.0.0.1 - - [19/Jan/2026 23:50:39] "[35m[1mGET /generate_receipt HTTP/1.1[0m" 500 -
+2026-01-19 23:50:43,438 INFO 127.0.0.1 - - [19/Jan/2026 23:50:43] "GET / HTTP/1.1" 200 -
+2026-01-19 23:50:43,480 INFO 127.0.0.1 - - [19/Jan/2026 23:50:43] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:43,493 INFO 127.0.0.1 - - [19/Jan/2026 23:50:43] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:48,569 INFO 127.0.0.1 - - [19/Jan/2026 23:50:48] "GET /clients HTTP/1.1" 200 -
+2026-01-19 23:50:48,612 INFO 127.0.0.1 - - [19/Jan/2026 23:50:48] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:52,952 INFO 127.0.0.1 - - [19/Jan/2026 23:50:52] "GET / HTTP/1.1" 200 -
+2026-01-19 23:50:53,000 INFO 127.0.0.1 - - [19/Jan/2026 23:50:53] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:53,008 INFO 127.0.0.1 - - [19/Jan/2026 23:50:53] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:55,078 INFO 127.0.0.1 - - [19/Jan/2026 23:50:55] "GET /house_bl HTTP/1.1" 200 -
+2026-01-19 23:50:55,117 INFO 127.0.0.1 - - [19/Jan/2026 23:50:55] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:57,451 INFO 127.0.0.1 - - [19/Jan/2026 23:50:57] "GET / HTTP/1.1" 200 -
+2026-01-19 23:50:57,490 INFO 127.0.0.1 - - [19/Jan/2026 23:50:57] "[36mGET /static/logo.png HTTP/1.1[0m" 304 -
+2026-01-19 23:50:57,502 INFO 127.0.0.1 - - [19/Jan/2026 23:50:57] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:51:05,534 INFO 127.0.0.1 - - [19/Jan/2026 23:51:05] "[32mPOST /add_client HTTP/1.1[0m" 302 -
+2026-01-19 23:51:05,563 INFO 127.0.0.1 - - [19/Jan/2026 23:51:05] "GET /clients HTTP/1.1" 200 -
+2026-01-19 23:51:05,594 INFO 127.0.0.1 - - [19/Jan/2026 23:51:05] "[36mGET /static/homepage_bg.png HTTP/1.1[0m" 304 -
+2026-01-19 23:51:11,752 ERROR Exception on /client/6 [GET]
+Traceback (most recent call last):
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+         ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask\app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
+    return current_app.ensure_sync(func)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL\Desktop\client_manager\app.py", line 485, in client_detail
+    return redirect(url_for('client_detail', client_id=client.id))
+           ^^^^^^^^^^^^^^
+NameError: name 'finance_status' is not defined
+2026-01-19 23:51:11,756 INFO 127.0.0.1 - - [19/Jan/2026 23:51:11] "[35m[1mGET /client/6 HTTP/1.1[0m" 500 -
