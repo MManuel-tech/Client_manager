@@ -64,6 +64,10 @@ class Client(db.Model):
     documents = db.relationship('ClientDocument', backref='client', cascade="all, delete-orphan")
 
 class BL(db.Model):
+    __tablename__ = 'bl'
+    __table_args__ = (
+    db.UniqueConstraint('client_id', 'bl_number', name='uq_client_bl'),
+    )
     id = db.Column(db.Integer, primary_key=True)
     bl_number = db.Column(db.String(100))
     amount_total = db.Column(db.Float, default=0)
@@ -77,6 +81,7 @@ class BL(db.Model):
         backref='bl',
         cascade="all, delete-orphan"
     )
+    
 
     @property
     def amount_unpaid(self):
@@ -3615,4 +3620,4 @@ if __name__ == '__main__':
         db.create_all()
     print("✅ Default login → admin / Cargo@conso123")
     # debug=False in production; leave True for local troubleshooting
-    app.run(debug=True)
+    app.run()
