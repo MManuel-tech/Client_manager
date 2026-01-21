@@ -24,7 +24,10 @@ from reportlab.lib.units import mm
 # --- App setup ---
 app = Flask(__name__)
 app.secret_key = 'cargobloc_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///clients.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL',
+    'sqlite:///clients.db'
+)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
