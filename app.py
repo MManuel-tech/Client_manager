@@ -22,14 +22,19 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 
 # --- App setup ---
+import os
+
 app = Flask(__name__)
 app.secret_key = 'cargobloc_secret_key'
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-    'DATABASE_URL',
-    'sqlite:///clients.db'
-)
-app.config['UPLOAD_FOLDER'] = 'uploads'
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set. App cannot start.")
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = 'uploads'
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -857,14 +862,15 @@ def generate_receipt():
     # -------------------------
     if request.method == 'POST':
 
+        # ----- Description handling -----
         desc_type = request.form.get('description_type')
         custom_desc = request.form.get('custom_description', '').strip()
 
-        if desc_type == 'custom' and custom_desc:
-            final_description = custom_desc
-        else:
-            final_description = desc_type
+        final_description = (
+            custom_desc if desc_type == 'custom' and custom_desc else desc_type
+        )
 
+        # ----- Core fields -----
         client_id = int(request.form.get('client_id'))
         total_amount = float(request.form.get('amount') or 0)
         issued_by = request.form.get('issued_by')
@@ -879,11 +885,19 @@ def generate_receipt():
             reference=transaction_id if payment_type != 'Cash' else None,
             description=f"{final_description} | Issued by: {issued_by}"
         )
-        db.session.add(receipt)
-        db.session.flush()
 
+        db.session.add(receipt)
+        db.session.flush()  # get receipt.id safely
+
+        # ----- Apply payments to BLs -----
         remaining = total_amount
-        bl_ids = request.form.getlist('bl_ids')
+
+        # ✅ FIX: cast BL IDs to integers (Postgres-safe)
+        raw_bl_ids = request.form.getlist('bl_ids')
+
+        # ✅ force integer casting
+        raw_bl_ids = request.form.getlist('bl_ids')
+        bl_ids = [int(x) for x in raw_bl_ids if x.isdigit()]
 
         if bl_ids:
             selected_bls = (
@@ -929,6 +943,7 @@ def generate_receipt():
         receipt=receipt,
         selected_client_id=client_id
     )
+
 @app.route('/receipts')
 @login_required
 def receipt_history():
