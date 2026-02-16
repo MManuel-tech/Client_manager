@@ -535,7 +535,7 @@ def client_detail(client_id):
 
         # ===== EXPORT SELECTED BLs =====
         elif action == 'export_selected_bl':
-            bl_ids = request.form.getlist('bl_ids')
+            bl_ids = [int(x) for x in request.form.getlist('bl_ids') if x.isdigit()]
 
             bls = (
                 BL.query
@@ -1297,7 +1297,7 @@ def create_bl_pdf(client, bls, pdf_path):
 
     # === Header ===
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(LEFT_MARGIN, height - TOP_MARGIN + 30, "Client Summary")
+    c.drawString(LEFT_MARGIN, height - TOP_MARGIN + 30, "Client Bill")
     c.setFont("Helvetica", 10)
     c.drawRightString(RIGHT_MARGIN, height - TOP_MARGIN + 34,
                       f"Generated: {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
