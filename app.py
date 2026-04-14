@@ -15,6 +15,7 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from werkzeug.utils import secure_filename
 from flask import flash 
 
+
 # ReportLab / PDF helpers (used later)
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -1057,6 +1058,19 @@ def download_receipt_pdf(receipt_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
+@app.route('/breakdown', methods=['GET', 'POST'])
+@login_required
+def breakdown():
+    if request.method == 'POST':
+        # Get JSON from JS
+        data = request.get_json()  # expecting { company, container, vessel, voyage, blList: [...] }
+        if not data:
+            return "No data sent", 400
+        return generate_breakdown_pdf(data)
+
+    return render_template_string(BREAKDOWN_HTML)
+
+
     # ======================================================
     # BACKGROUND (DRAW FIRST)
     # ======================================================
@@ -1419,6 +1433,237 @@ def create_bl_pdf(client, bls, pdf_path):
 
     c.save()
 
+from io import BytesIO
+from datetime import datetime
+
+from flask import send_file
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase.pdfmetrics import stringWidth
+
+
+def parse_weight(value):
+    try:
+        value = str(value).replace(",", "").replace("KG", "").replace("kg", "").strip()
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def split_text(text, max_width, font="Helvetica", size=10):
+    text = str(text).strip()
+    if not text:
+        return ["-"]
+
+    words = text.split()
+    lines = []
+    current = ""
+
+    for word in words:
+        test = current + (" " if current else "") + word
+        if stringWidth(test, font, size) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+
+    if current:
+        lines.append(current)
+
+    return lines or ["-"]
+
+
+def truncate_text(text, max_width, font="Helvetica", size=10):
+    text = str(text).strip()
+    if not text:
+        return "-"
+
+    if stringWidth(text, font, size) <= max_width:
+        return text
+
+    while text and stringWidth(text + "...", font, size) > max_width:
+        text = text[:-1]
+
+    return text + "..." if text else "..."
+
+
+def draw_lines(c, lines, x, y, line_height=12):
+    for i, line in enumerate(lines):
+        c.drawString(x, y - (i * line_height), line)
+
+
+def generate_breakdown_pdf(data):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+
+    # =========================
+    # PAGE / TABLE SETTINGS
+    # =========================
+    left_margin = 60
+    right_margin = 60
+    table_x = left_margin
+    table_width = width - left_margin - right_margin
+
+    header_h = 25
+    line_height = 12
+
+    # Balanced columns: BL | CONSIGNEE | DESCRIPTION | PKG | WEIGHT
+    col_widths = [115, 130, 160, 25, 50]
+    col_x = [table_x]
+    for w in col_widths[:-1]:
+        col_x.append(col_x[-1] + w)
+
+    headers = ["BL NO", "CONSIGNEE", "DESCRIPTION", "PKG", "WEIGHT"]
+
+    def draw_table_header(y_pos):
+        c.setFillColorRGB(0.15, 0.35, 0.65)
+        c.rect(table_x, y_pos, table_width, header_h, fill=1, stroke=0)
+
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("Helvetica-Bold", 10)
+        for i, h in enumerate(headers):
+            c.drawString(col_x[i] + 5, y_pos + 8, h)
+
+        c.setFillColorRGB(0, 0, 0)
+
+    # =========================
+    # HEADER
+    # =========================
+    c.setFont("Helvetica-Bold", 24)
+    c.drawCentredString(width / 2, height - 80, data.get("company", "CARGOBLOC LOGISTICS"))
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(60, height - 110, "CARGO BREAKDOWN")
+
+    c.setFont("Helvetica", 10)
+    c.drawRightString(width - 60, height - 80, datetime.now().strftime("%d %b %Y"))
+
+    # =========================
+    # INFO SECTION
+    # =========================
+    y = height - 130
+
+    def draw_info(label, value):
+        nonlocal y
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(60, y, label)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(144, y, str(value))
+        y -= 18
+
+    draw_info("CONTAINER NO:", data.get("container", "-"))
+    draw_info("VESSEL:", data.get("vessel", "-"))
+    draw_info("VOYAGE NO:", data.get("voyage", "-"))
+
+    # =========================
+    # TABLE START
+    # =========================
+    table_top = y - 80
+    draw_table_header(table_top)
+
+    y = table_top - header_h
+    total_weight = 0.0
+
+    bl_list = data.get("blList", [])
+
+    for i, bl in enumerate(bl_list):
+        bl_no = bl.get("bl", "-")
+        consignee = bl.get("consignee", "-")
+        description = bl.get("description", "-")
+        pkg = bl.get("pkg", "-")
+        weight = bl.get("weight", "-")
+
+        consignee_lines = split_text(consignee, col_widths[1] - 10, font="Helvetica", size=10)
+        description_lines = split_text(description, col_widths[2] - 10, font="Helvetica", size=10)
+
+        # Limit extreme rows so they do not grow forever
+        max_consignee_lines = 5
+        max_description_lines = 6
+
+        if len(consignee_lines) > max_consignee_lines:
+            consignee_lines = consignee_lines[:max_consignee_lines]
+            consignee_lines[-1] = truncate_text(consignee_lines[-1], col_widths[1] - 10)
+
+        if len(description_lines) > max_description_lines:
+            description_lines = description_lines[:max_description_lines]
+            description_lines[-1] = truncate_text(description_lines[-1], col_widths[2] - 10)
+
+        max_lines = max(len(consignee_lines), len(description_lines), 1)
+        row_h = max(25, max_lines * line_height + 10)
+
+        # Page break
+        if y - row_h < 80:
+            c.showPage()
+            c.setFont("Helvetica", 10)
+            y = height - 100
+            draw_table_header(y)
+            y -= header_h
+
+        # Alternate row shading
+        if i % 2 == 0:
+            c.setFillColorRGB(0.95, 0.97, 1)
+            c.rect(table_x, y - row_h, table_width, row_h, fill=1, stroke=0)
+            c.setFillColorRGB(0, 0, 0)
+
+        # Grid rectangle
+        c.setLineWidth(0.5)
+        c.rect(table_x, y - row_h, table_width, row_h)
+
+        for x_line in col_x[1:]:
+            c.line(x_line, y - row_h, x_line, y)
+
+        # Text placement
+        text_y = y - 15
+        c.setFont("Helvetica", 10)
+
+        # BL NO
+        c.drawString(col_x[0] + 5, text_y, str(bl_no))
+
+        # CONSIGNEE
+        draw_lines(c, consignee_lines, col_x[1] + 5, text_y, line_height=line_height)
+
+        # DESCRIPTION
+        draw_lines(c, description_lines, col_x[2] + 5, text_y, line_height=line_height)
+
+        # PKG
+        c.drawString(col_x[3] + 5, text_y, str(pkg))
+
+        # WEIGHT
+        c.drawRightString(col_x[4] + col_widths[4] - 12, text_y, str(weight))
+
+        # Total weight
+        total_weight += parse_weight(weight)
+
+        y -= row_h
+
+    # =========================
+    # TOTAL
+    # =========================
+    c.setLineWidth(0.8)
+    c.line(table_x, y, table_x + table_width, y)
+
+    y -= 20
+    c.setFont("Helvetica-Bold", 11)
+    c.drawRightString(table_x + table_width, y, f"TOTAL WEIGHT: {int(total_weight)} KG")
+
+    # =========================
+    # FOOTER
+    # =========================
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawCentredString(width / 2, 40, data.get("company", "CARGOBLOC LOGISTICS"))
+
+    c.save()
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"Breakdown_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+        mimetype="application/pdf"
+    )
+
 # -----------------------
 # HTML TEMPLATES
 # -----------------------
@@ -1745,6 +1990,7 @@ footer{text-align:center;color:#6b7280;font-size:13px;margin-top:18px;}
     <a href="{{ url_for('clients_page') }}">Clients</a>
     <a href="{{ url_for('receipts_home') }}">Receipts</a>
     <a href="{{ url_for('house_bl') }}">House BLs</a>
+    <a href="{{ url_for('breakdown') }}">Breakdown</a>
     <a href="{{ url_for('logout') }}">Logout</a>
   </nav>
 
@@ -3632,6 +3878,331 @@ a{ text-decoration:none; color:inherit; }
 </body>
 </html>
 """
+BREAKDOWN_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cargo Breakdown</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --blue:#2563eb;
+  --accent:#00AEEF;
+  --green:#16a34a;
+  --red:#dc2626;
+  --muted:#6b7280;
+}
+body{
+  margin:0;
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+}
+.container{
+  position:relative;
+  max-width:980px;
+  margin:40px auto;
+  background:rgba(255,255,255,0.92);
+  border-radius:14px;
+  padding:22px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.12);
+  overflow:hidden;
+}
+.watermark{
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  opacity:0.06;
+  pointer-events:none;
+  z-index:0;
+}
+.watermark img{width:420px;height:auto}
+h1{color:var(--blue);text-align:center;margin:6px 0 20px;font-size:24px;z-index:2;position:relative}
+.card{
+  margin-top:18px;
+  padding:18px;
+  background:white;
+  border-radius:12px;
+  box-shadow:0 6px 20px rgba(0,0,0,0.05);
+  position:relative;
+  z-index:2;
+}
+.title{
+  font-size:20px;
+  font-weight:600;
+  margin-bottom:12px;
+}
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:12px;
+}
+input{
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+  width:100%;
+  box-sizing:border-box;
+}
+button{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px 16px;
+  border:none;
+  border-radius:10px;
+  font-weight:600;
+  cursor:pointer;
+  color:#fff;
+  background:linear-gradient(135deg,var(--blue),var(--accent));
+  transition:all 0.18s;
+}
+button:hover{opacity:0.9}
+table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0 6px;
+  margin-top:12px;
+}
+th{
+  background:var(--blue);
+  color:white;
+  padding:10px;
+  text-align:left;
+  border-radius:8px;
+}
+td{
+  background:white;
+  padding:10px;
+  border-radius:8px;
+  box-shadow:0 4px 10px rgba(0,0,0,0.04);
+}
+.delete-btn{
+  background:var(--red);
+  color:white;
+  border:none;
+  padding:5px 10px;
+  border-radius:6px;
+  cursor:pointer;
+}
+.locked{
+  background:#f3f4f6;
+}
+footer{
+  text-align:center;
+  color:var(--muted);
+  font-size:13px;
+  margin-top:18px;
+}
+textarea{
+  padding:10px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+  width:100%;
+  box-sizing:border-box;
+  resize:vertical;
+  font-family:'Poppins',sans-serif;
+}
+td{
+  white-space: pre-line;
+  word-break: break-word;
+}
+button{
+  margin-right:5px;
+}
+.action-cell button{
+  padding:5px 10px;
+  font-size:12px;
+}
+.back-btn{
+  background:#6b7280;
+  margin-bottom:10px;
+}
+.back-btn:hover{
+  opacity:0.85;
+}
+
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="watermark"><img src="{{ url_for('static', filename='logo.png') }}"></div>
+  <button onclick="goBack()" class="back-btn">← Back</button>
+  <h1>Cargo Breakdown</h1>
+
+  <div class="card">
+    <div class="title">Start Breakdown Session</div>
+    <div class="grid">
+      <input id="company" placeholder="Company Name">
+      <input id="container" placeholder="Container No">
+      <input id="vessel" placeholder="Vessel">
+      <input id="voyage" placeholder="Voyage No">
+    </div>
+    <br>
+    <button id="startBtn" onclick="startSession()">Start Session</button>
+  </div>
+
+  <div class="card">
+    <div class="title">Add BL Entry</div>
+    <div class="grid">
+      <textarea id="bl" placeholder="BL Number" rows="2"></textarea>
+      <textarea id="consignee" placeholder="Consignee" rows="2"></textarea>
+      <textarea id="description" placeholder="Description" rows="3"></textarea>
+      <input id="package" placeholder="Package">
+      <input id="weight" placeholder="Weight">
+    </div>
+    <br>
+    <button onclick="addBL()">Add BL</button>
+  </div>
+
+  <div class="card">
+    <div class="title">Breakdown List</div>
+    <table>
+      <thead>
+        <tr>
+          <th>BL No</th>
+          <th>Consignee</th>
+          <th>Description</th>
+          <th>Package</th>
+          <th>Weight</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+    <br>
+    <button onclick="generatePDF()">Generate PDF</button>
+  </div>
+
+  <footer>©️ 2026 CargoBloc Logistics</footer>
+</div>
+
+<script>
+let sessionStarted = false;
+let blList = [];
+
+function startSession(){
+  if(sessionStarted){alert("Session already started"); return;}
+  const c=document.getElementById("container");
+  const v=document.getElementById("vessel");
+  const vg=document.getElementById("voyage");
+  const btn=document.getElementById("startBtn");
+  if(!c.value || !v.value || !vg.value){alert("Fill all session fields"); return;}
+  sessionStarted=true;
+  c.disabled=v.disabled=vg.disabled=true;
+  c.classList.add("locked"); v.classList.add("locked"); vg.classList.add("locked");
+  btn.disabled=true; btn.style.opacity=0.6; btn.style.cursor="not-allowed";
+}
+
+function addBL(){
+  if(!sessionStarted){alert("Start session first"); return;}
+
+  const data={
+    bl:document.getElementById("bl").value,
+    consignee:document.getElementById("consignee").value,
+    description:document.getElementById("description").value,
+    pkg:document.getElementById("package").value,
+    weight:document.getElementById("weight").value
+  };
+
+  if(!data.bl || !data.consignee){
+    alert("BL & Consignee required");
+    return;
+  }
+
+  if(editIndex !== null){
+    // UPDATE MODE
+    blList[editIndex] = data;
+    editIndex = null;
+    document.querySelector("button[onclick='addBL()']").innerText = "Add BL";
+  } else {
+    // NORMAL ADD
+    blList.push(data);
+  }
+
+  renderTable();
+  clearInputs();
+}
+
+function renderTable(){
+  const table=document.getElementById("tableBody");
+  table.innerHTML="";
+  blList.forEach((item,i)=>{
+    table.innerHTML+=`<tr>
+      <td>${item.bl}</td>
+      <td>${item.consignee}</td>
+      <td>${item.description}</td>
+      <td>${item.pkg}</td>
+      <td>${item.weight}</td>
+      <td class="action-cell">
+         <button onclick="editBL(${i})">Edit</button>
+         <button class="delete-btn" onclick="del(${i})">X</button>
+     </td>
+    </tr>`;
+  });
+}
+
+function del(i){blList.splice(i,1); renderTable();}
+function clearInputs(){["bl","consignee","description","package","weight"].forEach(id=>document.getElementById(id).value="");}
+function generatePDF(){
+  if(!sessionStarted){ alert("Start session first"); return; }
+
+  const payload = {
+    company: document.getElementById("company").value,
+    container: document.getElementById("container").value,
+    vessel: document.getElementById("vessel").value,
+    voyage: document.getElementById("voyage").value,
+    blList: blList
+  };
+
+  fetch('/breakdown', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  })
+  .then(res => {
+      if(!res.ok) throw new Error("Network response was not ok");
+      return res.blob();
+  })
+  .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Breakdown.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+  })
+  .catch(err => alert("Failed to generate PDF: " + err));
+}
+let editIndex = null;
+
+function editBL(i){
+  const item = blList[i];
+
+  document.getElementById("bl").value = item.bl;
+  document.getElementById("consignee").value = item.consignee;
+  document.getElementById("description").value = item.description;
+  document.getElementById("package").value = item.pkg;
+  document.getElementById("weight").value = item.weight;
+
+  editIndex = i;
+
+  // Change button text to Update
+  document.querySelector("button[onclick='addBL()']").innerText = "Update BL";
+}
+
+function goBack(){
+  window.history.back();
+}
+
+</script>
+</body>
+</html>
+"""
+
 if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     with app.app_context():
