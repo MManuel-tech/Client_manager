@@ -1538,7 +1538,7 @@ def generate_breakdown_pdf(data):
     c.drawString(60, height - 110, "CARGO BREAKDOWN")
 
     c.setFont("Helvetica", 10)
-    c.drawRightString(width - 60, height - 80, datetime.now().strftime("%d %b %Y"))
+    c.drawRightString(width - 60, height - 90, datetime.now().strftime("%d %b %Y"))
 
     # =========================
     # INFO SECTION
@@ -4050,7 +4050,7 @@ button{
       <textarea id="consignee" placeholder="Consignee" rows="2"></textarea>
       <textarea id="description" placeholder="Description" rows="3"></textarea>
       <input id="package" placeholder="Package">
-      <input id="weight" placeholder="Weight">
+      <textarea id="weight" placeholder="Weight" rows="2"></textarea>
     </div>
     <br>
     <button onclick="addBL()">Add BL</button>
