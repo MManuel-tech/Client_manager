@@ -1058,19 +1058,6 @@ def download_receipt_pdf(receipt_id):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-@app.route('/breakdown', methods=['GET', 'POST'])
-@login_required
-def breakdown():
-    if request.method == 'POST':
-        # Get JSON from JS
-        data = request.get_json()  # expecting { company, container, vessel, voyage, blList: [...] }
-        if not data:
-            return "No data sent", 400
-        return generate_breakdown_pdf(data)
-
-    return render_template_string(BREAKDOWN_HTML)
-
-
     # ======================================================
     # BACKGROUND (DRAW FIRST)
     # ======================================================
@@ -1267,6 +1254,17 @@ def breakdown():
         download_name=f"Receipt_{receipt.id:06d}.pdf",
         mimetype="application/pdf"
     )
+@app.route('/breakdown', methods=['GET', 'POST'])
+@login_required
+def breakdown():
+    if request.method == 'POST':
+        # Get JSON from JS
+        data = request.get_json()  # expecting { company, container, vessel, voyage, blList: [...] }
+        if not data:
+            return "No data sent", 400
+        return generate_breakdown_pdf(data)
+
+    return render_template_string(BREAKDOWN_HTML)
 
 # -----------------------
 # PDF helpers
@@ -1432,6 +1430,7 @@ def create_bl_pdf(client, bls, pdf_path):
     c.drawCentredString(width / 2, 40, "CARGOBLOC LOGISTICS — Vision to Reality")
 
     c.save()
+
 
 from io import BytesIO
 from datetime import datetime
