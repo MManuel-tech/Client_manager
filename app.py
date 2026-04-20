@@ -1266,26 +1266,548 @@ def breakdown():
 
     return render_template_string(BREAKDOWN_HTML)
 
+
+
+from io import BytesIO
+from datetime import datetime
+import random
+import re
+
+from flask import render_template_string, request, send_file
+from flask_login import login_required
+from reportlab.pdfgen import canvas
+
+
+# =========================================================
+# AI ENGINE
+# =========================================================
+def smart_item_engine(items, total_weight):
+    def fob(desc):
+        desc = desc.lower()
+
+        if "clothing" in desc:
+            return 1.20
+        if "paint" in desc:
+            return 2.50
+        if "mattress" in desc:
+            return 12.00
+        if "bed" in desc:
+            return 45.00
+        if "rice" in desc:
+            return 3.00
+
+        return 2.00
+
+    enriched = []
+    total_value = 0.0
+
+    for item in items:
+        qty = float(item.get("qty", 1))
+        unit = fob(item.get("desc", ""))
+        value = qty * unit
+        total_value += value
+
+        enriched.append({
+        "desc": item.get("desc", ""),
+        "qty": qty,
+        "qty_unit": item.get("qty_unit", "PCS"),
+        "manual_weight": item.get("manual_weight"),
+        "unit": unit,
+       "value": value
+    })
+
+    manual_total = sum(
+        item["manual_weight"]
+        for item in enriched
+        if item.get("manual_weight") is not None
+    )
+
+    remaining_weight = max(total_weight - manual_total, 0)
+
+    remaining_value_total = sum(
+        item["value"]
+        for item in enriched
+        if item.get("manual_weight") is None
+    )
+
+    for item in enriched:
+        if item.get("manual_weight") is not None:
+         if float(item["manual_weight"]).is_integer():
+           item["weight"] = int(item["manual_weight"])
+         else:
+           item["weight"] = round(item["manual_weight"], 2)
+        else:
+              share = item["value"] / remaining_value_total if remaining_value_total > 0 else 0
+              calculated_weight = remaining_weight * share
+
+        if calculated_weight.is_integer():
+           item["weight"] = int(calculated_weight)
+        else:
+           item["weight"] = round(calculated_weight, 2)
+
+    return enriched
+
+
+# =========================================================
+# HELPER: MULTILINE TEXT
+# =========================================================
+
+def draw_multiline(c, text, x, y, width, line_height=11):
+    if not text:
+        return y
+
+    c.setFont("Helvetica", 9)
+
+    words = str(text).split()
+    lines = []
+    line = ""
+
+    for w in words:
+        test_line = (line + " " + w).strip()
+
+        if c.stringWidth(test_line, "Helvetica", 9) <= width:
+            line = test_line
+        else:
+            if line:
+                lines.append(line)
+            line = w
+
+    if line:
+        lines.append(line)
+
+    offset = 0
+    for l in lines:
+        c.drawString(x, y - offset, l)
+        offset += line_height
+
+    return y - offset
+# =========================================================
+# HELPER: HEX COLOR TO RGB
+# =========================================================
+def hex_to_rgb(hex_color):
+    if not hex_color:
+        hex_color = "#cfe8ff"
+
+    hex_color = hex_color.strip().lstrip("#")
+
+    if len(hex_color) != 6:
+        hex_color = "cfe8ff"
+
+    try:
+        return tuple(int(hex_color[i:i+2], 16) / 255 for i in (0, 2, 4))
+    except:
+        return (0.81, 0.91, 1.0)
+
+
+# =========================================================
+# HOME ROUTE
+# =========================================================
+@app.route('/invoices_home')
+@login_required
+def invoices_home():
+    return render_template_string(INVOICES_HOME_HTML)
+
+
+# =========================================================
+# GENERATE PREVIEW ROUTE
+# =========================================================
+@app.route('/generate_commercial_invoice', methods=['GET', 'POST'])
+@login_required
+def generate_commercial_invoice():
+    if request.method == 'POST':
+
+        shipper_name = request.form.get("shipper_name", "").strip()
+        shipper_address = request.form.get("shipper_address", "").strip()
+        consignee_name = request.form.get("consignee_name", "").strip()
+        consignee_address = request.form.get("consignee_address", "").strip()
+        container_no = request.form.get("container_no", "").strip()
+        container_size = request.form.get("container_size", "").strip()
+        theme_color = request.form.get("theme_color", "#cfe8ff").strip()
+
+        total_weight_raw = request.form.get("total_weight", "0").strip()
+        try:
+            total_weight = float(total_weight_raw)
+        except:
+            total_weight = 0.0
+
+        raw_items = request.form.get("freight_input", "")
+        if not raw_items.strip():
+            return "Error: No items provided"
+
+        items = []
+        for line in raw_items.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split("-")
+            desc = parts[0].strip()
+
+            qty = 1
+            qty_unit = "PCS"
+            manual_weight = None
+
+            if len(parts) > 1:
+                qty_text = parts[1].strip().lower()
+
+                qty_match = re.search(r'(\d+(?:\.\d+)?)', qty_text)
+                if qty_match:
+                     qty = float(qty_match.group(1))
+
+                if "box" in qty_text:
+                    qty_unit = "BOXES"
+                elif "pcs" in qty_text or "piece" in qty_text:
+                    qty_unit = "PCS"
+                elif "kg" in qty_text:
+                    qty_unit = "KG"
+                elif "tote" in qty_text:
+                    qty_unit = "TOTES"
+                elif "bag" in qty_text:
+                    qty_unit = "BAGS"
+                elif "carton" in qty_text:
+                    qty_unit = "CARTONS"
+
+                weight_match = re.search(r'(\d+(?:\.\d+)?)\s*kg', qty_text)
+                if weight_match:
+                   base_weight = float(weight_match.group(1))
+                   manual_weight = base_weight * qty
+
+            items.append({
+                "desc": desc,
+                "qty": qty,
+                "qty_unit": qty_unit,
+                "manual_weight": manual_weight
+            })
+
+        data = smart_item_engine(items, total_weight)
+
+        return render_template_string(
+            PREVIEW_HTML,
+            shipper_name=shipper_name,
+            shipper_address=shipper_address,
+            consignee_name=consignee_name,
+            consignee_address=consignee_address,
+            container_no=container_no,
+            container_size=container_size,
+            theme_color=theme_color,
+            total_weight=total_weight,
+            freight_input=raw_items,
+            items=data
+        )
+
+    return render_template_string(COMMERCIAL_INVOICE_UI_HTML)
+
+
+# =========================================================
+# EXPORT PDF ROUTE
+# =========================================================
+@app.route('/export_invoice_pdf', methods=['POST'])
+@login_required
+def export_invoice_pdf():
+    shipper_name = request.form.get("shipper_name", "").strip()
+    shipper_address = request.form.get("shipper_address", "").strip()
+    consignee_name = request.form.get("consignee_name", "").strip()
+    consignee_address = request.form.get("consignee_address", "").strip()
+    container_no = request.form.get("container_no", "").strip()
+    container_size = request.form.get("container_size", "").strip()
+    theme_color = request.form.get("theme_color", "#cfe8ff").strip()
+
+    total_weight_raw = request.form.get("total_weight", "0").strip()
+    try:
+        total_weight = float(total_weight_raw)
+    except:
+        total_weight = 0.0
+
+    raw_items = request.form.get("freight_input", "")
+    if not raw_items.strip():
+        return "Error: No freight items provided"
+
+    items = []
+
+    for line in raw_items.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+
+        parts = line.split("-")
+        desc = parts[0].strip()
+
+        qty = 1
+        qty_unit = "PCS"
+        manual_weight = None
+
+        if len(parts) > 1:
+            qty_text = parts[1].strip().lower()
+
+            qty_match = re.search(r'(\d+(?:\.\d+)?)', qty_text)
+            if qty_match:
+                qty = float(qty_match.group(1))
+
+            if "box" in qty_text:
+                qty_unit = "BOXES"
+            elif "pcs" in qty_text or "piece" in qty_text:
+                qty_unit = "PCS"
+            elif "kg" in qty_text:
+                qty_unit = "KG"
+            elif "tote" in qty_text:
+                qty_unit = "TOTES"
+            elif "bag" in qty_text:
+                qty_unit = "BAGS"
+            elif "carton" in qty_text:
+                qty_unit = "CARTONS"
+
+            weight_match = re.search(r'(\d+(?:\.\d+)?)\s*kg', qty_text)
+            if weight_match:
+               base_weight = float(weight_match.group(1))
+               manual_weight = base_weight * qty
+
+        items.append({
+            "desc": desc,
+            "qty": qty,
+            "qty_unit": qty_unit,
+            "manual_weight": manual_weight
+        })
+      
+
+    data = smart_item_engine(items, total_weight)
+
+    invoice_no = f"INV-{datetime.now().strftime('%Y%m%d')}-{random.randint(100,999)}"
+    invoice_date = datetime.now().strftime("%d %B %Y")
+    freight_charge = 300.00
+    r, g, b = hex_to_rgb(theme_color)
+
+    buffer = BytesIO()
+    p = canvas.Canvas(buffer)
+
+    # =========================
+    # HEADER
+    # =========================
+    p.setFont("Helvetica-Bold", 18)
+    p.drawCentredString(300, 805, "COMMERCIAL INVOICE")
+
+    p.setFont("Helvetica", 9)
+    p.drawRightString(570, 790, f"Invoice No: {invoice_no}")
+    p.drawRightString(570, 776, f"Date: {invoice_date}")
+
+    # =========================
+    # SHIPPER / CONSIGNEE BOXES
+    # =========================
+    box_top = 755
+    box_height = 75
+
+    # Shipper box
+    p.setFillColorRGB(r, g, b)
+    p.rect(35, box_top - box_height, 240, box_height, fill=1, stroke=1)
+
+    p.setFillColorRGB(0, 0, 0)
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(45, box_top - 15, "SHIPPER")
+
+    p.setFont("Helvetica", 9)
+    p.drawString(45, box_top - 30, shipper_name)
+
+    y_shipper = box_top - 44
+    y_shipper = draw_multiline(p, shipper_address, 45, y_shipper, 220)
+
+    # Consignee box
+    p.setFillColorRGB(r, g, b)
+    p.rect(315, box_top - box_height, 240, box_height, fill=1, stroke=1)
+
+    p.setFillColorRGB(0, 0, 0)
+    p.setFont("Helvetica-Bold", 10)
+    p.drawString(325, box_top - 15, "CONSIGNEE")
+
+    p.setFont("Helvetica", 9)
+    p.drawString(325, box_top - 30, consignee_name)
+
+    y_consignee = box_top - 44
+    y_consignee = draw_multiline(p, consignee_address, 325, y_consignee, 220)
+
+    # =========================
+    # META SECTION
+    # =========================
+    meta_y = 655
+
+    p.setFont("Helvetica-Bold", 9)
+    p.drawString(40, meta_y, "CONTAINER NO:")
+    p.setFont("Helvetica", 9)
+    p.drawString(125, meta_y, container_no)
+
+    p.setFont("Helvetica-Bold", 9)
+    p.drawString(210, meta_y, "SIZE:")
+    p.setFont("Helvetica", 9)
+    p.drawString(245, meta_y, container_size)
+
+    p.setFont("Helvetica-Bold", 9)
+    p.drawString(310, meta_y, "TOTAL WEIGHT:")
+    p.setFont("Helvetica", 9)
+    p.drawString(405, meta_y, f"{total_weight:,.2f} KG")
+
+    # =========================
+    # TABLE SETTINGS
+    # =========================
+    total_value = 0.0
+    row_height = 20
+    y_min = 80
+
+    item_x = 45
+    desc_x = 85
+    qty_x = 330
+    unit_x = 410
+    amount_x = 480
+    weight_x = 555
+
+    table_left = 40
+    table_right = 560
+
+    def draw_table_header(current_y):
+        p.setFillColorRGB(r, g, b)
+        p.rect(table_left, current_y - 14, table_right - table_left, 18, fill=1, stroke=0)
+
+        p.setFillColorRGB(0, 0, 0)
+        p.setFont("Helvetica-Bold", 9)
+
+        p.drawString(item_x, current_y, "ITEM")
+        p.drawString(desc_x, current_y, "DESCRIPTION")
+        p.drawRightString(qty_x, current_y, "QTY")
+        p.drawRightString(unit_x, current_y, "UNIT PRICE")
+        p.drawRightString(amount_x, current_y, "AMOUNT")
+        p.drawRightString(weight_x, current_y, "WEIGHT")
+
+        p.setStrokeColorRGB(0.70, 0.80, 0.90)
+        p.line(table_left, current_y - 8, table_right, current_y - 8)
+
+    # =========================
+    # FIRST TABLE HEADER
+    # =========================
+    table_y = meta_y - 35
+    draw_table_header(table_y)
+
+    y = table_y - 25
+    p.setFont("Helvetica", 8)
+
+    # =========================
+    # TABLE ROWS
+    # =========================
+    for i, item in enumerate(data):
+
+        amount = item["qty"] * item["unit"]
+        total_value += amount
+
+        if y < y_min:
+            p.showPage()
+
+            # reset font and colors after new page
+            p.setFillColorRGB(0, 0, 0)
+            p.setStrokeColorRGB(0, 0, 0)
+
+            table_y = 760
+            draw_table_header(table_y)
+
+            y = table_y - 25
+            p.setFont("Helvetica", 8)
+
+        qty = item["qty"]
+        qty_display = int(qty) if float(qty).is_integer() else qty
+
+        desc = item["desc"] or ""
+        if len(desc) > 42:
+            desc = desc[:42] + "..."
+
+        # Alternating row background
+        if i % 2 == 0:
+            p.setFillColorRGB(0.96, 0.98, 1.0)
+            p.rect(table_left, y - 10, table_right - table_left, 16, fill=1, stroke=0)
+
+        p.setFillColorRGB(0, 0, 0)
+
+        qty_text = f"{qty_display} {item.get('qty_unit', 'PCS')}"
+
+        p.drawString(item_x, y, str(i + 1))
+        p.drawString(desc_x, y, desc)
+
+        p.drawRightString(qty_x, y, qty_text)
+        p.drawRightString(unit_x, y, f"{item['unit']:.2f}")
+        p.drawRightString(amount_x, y, f"{amount:,.2f}")
+        p.drawRightString(weight_x, y, f"{item['weight']:.2f} KG")
+
+        p.setStrokeColorRGB(0.85, 0.90, 0.95)
+        p.line(table_left, y - 8, table_right, y - 8)
+
+        y -= row_height
+
+    # =========================
+    # TOTALS
+    # =========================
+    cf_total = total_value + freight_charge
+
+    y -= 20
+    p.line(350, y, 590, y)
+
+    y -= 25
+    p.setFont("Helvetica-Bold", 10)
+
+    p.drawRightString(500, y, "FOB VALUE:")
+    p.drawRightString(555, y, f"USD {total_value:,.2f}")
+
+    y -= 18
+    p.drawRightString(500, y, "FREIGHT:")
+    p.drawRightString(555, y, f"USD {freight_charge:,.2f}")
+
+    y -= 18
+    p.drawRightString(500, y, "C & F VALUE:")
+    p.drawRightString(555, y, f"USD {cf_total:,.2f}")
+
+    y -= 18
+    p.drawRightString(500, y, "TOTAL WEIGHT:")
+    p.drawRightString(555, y, f"{total_weight:,.2f} KG")
+
+    # Footer
+    p.setStrokeColorRGB(0.75, 0.75, 0.75)
+    p.line(40, 45, 590, 45)
+
+    p.setFont("Helvetica-Oblique", 8)
+    p.drawCentredString(300, 30, "CARGOBLOC LOGISTICS - Vision to Reality")
+
+    p.save()
+
+    buffer.seek(0)
+
+    return send_file(
+    buffer,
+    as_attachment=True,
+    download_name="commercial_invoice.pdf",
+    mimetype="application/pdf"
+    )
+
 # -----------------------
 # PDF helpers
 # -----------------------
 def draw_multiline(c, text, x, y, width, line_height=10):
     if not text:
-        return
-    c.setFont("Helvetica", 7)
+        return y
+
+    c.setFont("Helvetica", 8)
+
     words = text.split()
     line = ""
-    offset = 0
+    current_y = y
+
     for word in words:
         test_line = f"{line} {word}".strip()
-        if c.stringWidth(test_line, "Helvetica", 7) <= width:
+
+        if c.stringWidth(test_line, "Helvetica", 8) <= width:
             line = test_line
         else:
-            c.drawString(x, y - offset, line)
-            offset += line_height
+            c.drawString(x, current_y, line)
+            current_y -= line_height
             line = word
+
     if line:
-        c.drawString(x, y - offset, line)
+        c.drawString(x, current_y, line)
+        current_y -= line_height
+
+    return current_y
 
 def create_bl_pdf(client, bls, pdf_path):
     c = canvas.Canvas(pdf_path, pagesize=A4)
@@ -1990,6 +2512,10 @@ footer{text-align:center;color:#6b7280;font-size:13px;margin-top:18px;}
     <a href="{{ url_for('receipts_home') }}">Receipts</a>
     <a href="{{ url_for('house_bl') }}">House BLs</a>
     <a href="{{ url_for('breakdown') }}">Breakdown</a>
+    <a href="{{ url_for('invoices_home') }}">
+    <i class="fas fa-file-invoice"></i>
+    <span>Invoice</span>
+    </a>
     <a href="{{ url_for('logout') }}">Logout</a>
   </nav>
 
@@ -4198,6 +4724,651 @@ function goBack(){
 }
 
 </script>
+</body>
+</html>
+"""
+
+# =========================================================
+# HOME PAGE HTML
+# =========================================================
+INVOICES_HOME_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoices</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+}
+
+.container{
+  max-width:950px;
+  margin:60px auto;
+  background:rgba(255,255,255,0.96);
+  border-radius:20px;
+  padding:40px;
+  box-shadow:0 20px 50px rgba(0,0,0,0.08);
+}
+
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:30px;
+  gap:16px;
+}
+
+.header h1{
+  color:#2563eb;
+  margin:0;
+  font-size:30px;
+}
+
+.subtitle{
+  color:#6b7280;
+  margin-top:6px;
+  font-size:14px;
+}
+
+.btn{
+  background:#2563eb;
+  color:#fff;
+  padding:10px 16px;
+  border-radius:12px;
+  text-decoration:none;
+  font-weight:600;
+  white-space:nowrap;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:30px;
+}
+
+.card{
+  display:block;
+  background:rgba(255,255,255,0.72);
+  border:1px solid rgba(255,255,255,0.6);
+  backdrop-filter:blur(12px);
+  border-radius:20px;
+  padding:30px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.08);
+  transition:all 0.2s ease;
+  text-decoration:none;
+  color:inherit;
+}
+
+.card:hover{
+  transform:translateY(-4px);
+  box-shadow:0 18px 40px rgba(37,99,235,0.15);
+}
+
+.card h3{
+  color:#2563eb;
+  margin-top:0;
+  margin-bottom:12px;
+}
+
+.card p{
+  color:#4b5563;
+  font-size:14px;
+  line-height:1.6;
+}
+
+.card.coming-soon{
+  opacity:0.75;
+}
+
+.card small{
+  display:inline-block;
+  margin-top:14px;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#fef3c7;
+  color:#92400e;
+  font-size:11px;
+  font-weight:600;
+}
+
+@media (max-width: 768px){
+  .container{
+    margin:20px;
+    padding:24px;
+  }
+  .grid{
+    grid-template-columns:1fr;
+  }
+  .header{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>Invoice Center</h1>
+      <div class="subtitle">Create, manage and export commercial and custom invoices</div>
+    </div>
+
+    <a href="{{ url_for('home') }}" class="btn">← Back to Dashboard</a>
+  </div>
+
+  <div class="grid">
+    <a href="{{ url_for('generate_commercial_invoice') }}" class="card">
+      <h3>📄 Create Commercial Invoice</h3>
+      <p>
+        Generate a professional commercial invoice with shipper, consignee,
+        quantity, weight, FOB value and item details.
+      </p>
+    </a>
+
+    <a href="#" class="card coming-soon">
+      <h3>✨ Create Customized Invoice</h3>
+      <p>
+        Build advanced invoice templates with your own layout, logo,
+        table style and custom sections.
+      </p>
+      <small>Coming Soon</small>
+    </a>
+  </div>
+</div>
+
+</body>
+</html>
+"""
+
+
+# =========================================================
+# INVOICE ENTRY HTML
+# =========================================================
+COMMERCIAL_INVOICE_UI_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Smart Commercial Invoice</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+}
+
+.container{
+  max-width:1100px;
+  margin:40px auto;
+  background:rgba(255,255,255,0.97);
+  border-radius:20px;
+  padding:30px;
+}
+
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:25px;
+}
+
+.header h1{
+  margin:0;
+  color:#2563eb;
+}
+
+.btn{
+  background:#2563eb;
+  color:#fff;
+  border:none;
+  padding:10px 16px;
+  border-radius:10px;
+  font-weight:600;
+  cursor:pointer;
+  text-decoration:none;
+}
+
+.layout{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px;
+}
+
+.card{
+  background:#fff;
+  padding:20px;
+  border-radius:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.06);
+}
+
+label{
+  display:block;
+  margin-top:10px;
+  font-size:13px;
+  font-weight:600;
+}
+
+input, textarea{
+  width:100%;
+  padding:10px;
+  margin-top:5px;
+  border-radius:8px;
+  border:1px solid #ddd;
+  font-family:'Poppins',sans-serif;
+  box-sizing:border-box;
+}
+
+textarea{
+  min-height:90px;
+  resize:vertical;
+}
+
+.smart-box{
+  min-height:180px;
+  background:#f9fafb;
+  border:2px dashed #cbd5e1;
+}
+
+button{
+  margin-top:15px;
+  width:100%;
+  padding:12px;
+  background:#2563eb;
+  color:white;
+  border:none;
+  border-radius:10px;
+  font-size:14px;
+  cursor:pointer;
+}
+
+@media (max-width: 900px){
+  .layout{
+    grid-template-columns:1fr;
+  }
+  .container{
+    margin:20px;
+  }
+  .header{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+}
+select{
+  width:100%;
+  padding:10px;
+  margin-top:5px;
+  border-radius:8px;
+  border:1px solid #ddd;
+  font-family:'Poppins',sans-serif;
+  box-sizing:border-box;
+}
+
+input[type="color"]{
+  height:50px;
+  padding:4px;
+  cursor:pointer;
+}
+
+.form-row{
+  display:flex;
+  gap:15px;
+  margin-top:10px;
+}
+
+.form-group{
+  flex:1;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="header">
+    <h1>Smart Freight Invoice AI</h1>
+    <a href="{{ url_for('invoices_home') }}" class="btn">← Back</a>
+  </div>
+
+  <form method="post">
+
+    <div class="layout">
+
+      <div class="card">
+        <h3>Shipper & Consignee</h3>
+
+        <label>Shipper Name</label>
+        <input name="shipper_name" required>
+
+        <label>Shipper Address</label>
+        <textarea name="shipper_address" required></textarea>
+
+        <label>Consignee Name</label>
+        <input name="consignee_name" required>
+
+        <label>Consignee Address</label>
+        <textarea name="consignee_address" required></textarea>
+
+        <div class="form-row">
+
+  <div class="form-group">
+    <label>Container Number</label>
+    <input name="container_no" placeholder="e.g. TRHU6850736" required>
+  </div>
+
+  <div class="form-group">
+    <label>Container Size</label>
+    <select name="container_size" required>
+      <option value="20FT">20FT</option>
+      <option value="40FT">40FT</option>
+      <option value="40HQ">40HQ</option>
+      <option value="45HQ">45HQ</option>
+    </select>
+  </div>
+
+</div>
+
+<label>Theme Color</label>
+<input type="color" name="theme_color" value="#cfe8ff">
+
+<label>Total Weight (KG)</label>
+<input name="total_weight" required>
+      </div>
+
+      <div class="card">
+        <h3>AI Freight Input (SMART MODE)</h3>
+
+        <label>Type your cargo here:</label>
+        <textarea class="smart-box" name="freight_input" placeholder="
+USED CLOTHING GRADE C - 150KG
+WOODEN BED - 2PCS
+EMULSION PAINT - 150PCS X 4PCS X 5L
+MATTRESS - 15PCS
+" required></textarea>
+
+        <button type="submit">Generate Smart Invoice</button>
+
+        <p style="font-size:12px;color:gray;margin-top:10px;">
+          AI will automatically assign FOB + distribute weight + calculate totals
+        </p>
+      </div>
+
+    </div>
+
+  </form>
+
+</div>
+
+</body>
+</html>
+"""
+
+
+# =========================================================
+# PREVIEW HTML
+# =========================================================
+PREVIEW_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Invoice Preview</title>
+<style>
+body{
+  font-family:'Poppins',sans-serif;
+  background:url('{{ url_for('static', filename='homepage_bg.png') }}') no-repeat center center fixed;
+  background-size:cover;
+  margin:0;
+  padding:30px;
+}
+
+.box{
+  max-width:1000px;
+  margin:40px auto;
+  background:rgba(255,255,255,0.96);
+  padding:30px;
+  border-radius:20px;
+  box-shadow:0 20px 50px rgba(0,0,0,0.10);
+  backdrop-filter:blur(10px);
+}
+
+.loading{
+  text-align:center;
+  padding:40px;
+  font-size:18px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:20px;
+}
+
+td, th{
+  border:1px solid #ddd;
+  padding:8px;
+  text-align:left;
+}
+
+th{
+  background:{{ theme_color }};
+}}
+
+button{
+  margin-top:25px;
+  padding:14px 20px;
+  background:linear-gradient(135deg, #2563eb, #1d4ed8);
+  color:white;
+  border:none;
+  border-radius:12px;
+  cursor:pointer;
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:0.3px;
+  box-shadow:0 10px 25px rgba(37,99,235,0.25);
+  transition:all 0.2s ease;
+}
+
+button:hover{
+  transform:translateY(-2px);
+  box-shadow:0 14px 30px rgba(37,99,235,0.35);
+}
+
+.meta{
+  margin-top:10px;
+  line-height:1.7;
+}
+
+.meta{
+  margin-top:10px;
+  line-height:1.7;
+  padding:16px;
+  border-radius:10px;
+  background:{{ theme_color }};
+}
+.top-bar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:20px;
+}
+
+.back-btn{
+  display:inline-block;
+  padding:10px 16px;
+  background:#ffffff;
+  color:#2563eb;
+  border:1px solid #dbeafe;
+  border-radius:10px;
+  text-decoration:none;
+  font-weight:600;
+  box-shadow:0 4px 12px rgba(0,0,0,0.05);
+  transition:all 0.2s ease;
+}
+
+.back-btn:hover{
+  background:#eff6ff;
+  transform:translateY(-1px);
+}
+.qty-input,
+.fob-input,
+.weight-input{
+  width:90px;
+  padding:6px;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+}
+
+.totals-box{
+  margin-top:25px;
+  padding:18px;
+  background:#f8fafc;
+  border-radius:12px;
+  border:1px solid #e5e7eb;
+  line-height:2;
+  font-size:14px;
+}
+
+</style>
+</head>
+<body>
+<div class="box">
+
+  <div id="loading" class="loading">
+    🤖 Manuel-AI is processing invoice... please wait
+  </div>
+
+  <div id="content" style="display:none;">
+    
+  <div class="top-bar">
+  <a href="{{ url_for('generate_commercial_invoice') }}" class="back-btn">← Back</a>
+  <h2 style="margin:0;">Commercial Invoice Preview</h2>
+</div>
+    <h2>Commercial Invoice Preview</h2>
+
+    <div class="meta">
+      <strong>SHIPPER:</strong> {{ shipper_name }}<br>
+      <strong>SHIPPER ADDRESS:</strong> {{ shipper_address }}<br><br>
+
+      <strong>CONSIGNEE:</strong> {{ consignee_name }}<br>
+      <strong>CONSIGNEE ADDRESS:</strong> {{ consignee_address }}<br><br>
+
+      <strong>CONTAINER:</strong> {{ container_no }}<br>
+      <strong>CONTAINER SIZE:</strong> {{ container_size }}<br>
+      <strong>TOTAL WEIGHT:</strong> {{ total_weight }} KG<br>
+    </div>
+
+    <table>
+      <tr>
+        <th>Item</th>
+        <th>Description</th>
+        <th>Qty</th>
+        <th>FOB</th>
+        <th>Amount</th>
+        <th>Weight</th>
+      </tr>
+
+      {% for i in items %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ i.desc }}</td>
+        <td>
+  <input type="number" class="qty-input" value="{{ i.qty }}" step="0.01">
+</td>
+<td>
+  <input type="number" class="fob-input" value="{{ '%.2f'|format(i.unit) }}" step="0.01">
+</td>
+<td class="amount-cell">{{ '%.2f'|format(i.value) }}</td>
+<td>
+  <input type="number" class="weight-input" value="{{ i.weight }}" step="0.01">
+</td>
+      </tr>
+      {% endfor %}
+    </table>
+    <div class="totals-box">
+  <div><strong>FOB VALUE:</strong> USD <span id="fobTotal">0.00</span></div>
+  <div><strong>FREIGHT:</strong> USD <span id="freightTotal">300.00</span></div>
+  <div><strong>C & F VALUE:</strong> USD <span id="cfTotal">0.00</span></div>
+  <div><strong>TOTAL WEIGHT:</strong> <span id="weightTotal">0</span> KG</div>
+</div>
+
+    <form action="/export_invoice_pdf" method="post">
+      <input type="hidden" name="shipper_name" value="{{ shipper_name|e }}">
+      <input type="hidden" name="shipper_address" value="{{ shipper_address|e }}">
+      <input type="hidden" name="consignee_name" value="{{ consignee_name|e }}">
+      <input type="hidden" name="consignee_address" value="{{ consignee_address|e }}">
+      <input type="hidden" name="container_no" value="{{ container_no|e }}">
+      <input type="hidden" name="total_weight" value="{{ total_weight }}">
+      <input type="hidden" name="container_size" value="{{ container_size|e }}">
+      <input type="hidden" name="theme_color" value="{{ theme_color|e }}">
+      <textarea name="freight_input" hidden>{{ freight_input }}</textarea>
+
+      <button type="submit">Print / Download PDF</button>
+    </form>
+
+  </div>
+</div>
+
+<script>
+setTimeout(() => {
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("content").style.display = "block";
+}, 20000);
+</script>
+<script>
+function recalculateTotals(){
+  let rows = document.querySelectorAll("table tr");
+  let totalFOB = 0;
+  let totalWeight = 0;
+  let freight = 300;
+
+  rows.forEach((row, index) => {
+    if(index === 0) return;
+
+    let qtyInput = row.querySelector('.qty-input');
+    let fobInput = row.querySelector('.fob-input');
+    let weightInput = row.querySelector('.weight-input');
+    let amountCell = row.querySelector('.amount-cell');
+
+    if(qtyInput && fobInput && weightInput){
+      let qty = parseFloat(qtyInput.value) || 0;
+      let fob = parseFloat(fobInput.value) || 0;
+      let weight = parseFloat(weightInput.value) || 0;
+
+      let amount = qty * fob;
+      amountCell.innerText = amount.toFixed(2);
+
+      totalFOB += amount;
+      totalWeight += weight;
+    }
+  });
+
+  document.getElementById('fobTotal').innerText = totalFOB.toFixed(2);
+  document.getElementById('cfTotal').innerText = (totalFOB + freight).toFixed(2);
+  document.getElementById('weightTotal').innerText = totalWeight.toFixed(2);
+}
+
+window.addEventListener('load', () => {
+  document.querySelectorAll('.qty-input, .fob-input, .weight-input').forEach(input => {
+    input.addEventListener('input', recalculateTotals);
+  });
+
+  recalculateTotals();
+});
+</script>
+
 </body>
 </html>
 """
