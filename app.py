@@ -1332,18 +1332,21 @@ def smart_item_engine(items, total_weight):
 
     for item in enriched:
         if item.get("manual_weight") is not None:
-         if float(item["manual_weight"]).is_integer():
-           item["weight"] = int(item["manual_weight"])
-         else:
-           item["weight"] = round(item["manual_weight"], 2)
-        else:
-              share = item["value"] / remaining_value_total if remaining_value_total > 0 else 0
-              calculated_weight = remaining_weight * share
+            manual_weight = float(item["manual_weight"])
 
-        if calculated_weight.is_integer():
-           item["weight"] = int(calculated_weight)
+            if manual_weight.is_integer():
+                item["weight"] = int(manual_weight)
+            else:
+                item["weight"] = round(manual_weight, 2)
+
         else:
-           item["weight"] = round(calculated_weight, 2)
+            share = item["value"] / remaining_value_total if remaining_value_total > 0 else 0
+            calculated_weight = remaining_weight * share
+
+            if calculated_weight.is_integer():
+                item["weight"] = int(calculated_weight)
+            else:
+                item["weight"] = round(calculated_weight, 2)
 
     return enriched
 
